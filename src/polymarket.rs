@@ -117,6 +117,22 @@ impl PolymarketDataClient {
         self.get_json(&url, &query)
     }
 
+    pub fn activity(
+        &self,
+        user: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<UserTrade>, PolymarketError> {
+        let url = format!("{}/activity", self.base_url);
+        let query = [
+            ("user", user.to_owned()),
+            ("limit", limit.clamp(1, 100).to_string()),
+            ("offset", offset.to_string()),
+        ];
+
+        self.get_json(&url, &query)
+    }
+
     fn get_json<T>(&self, url: &str, query: &[(&str, String)]) -> Result<T, PolymarketError>
     where
         T: for<'de> Deserialize<'de>,

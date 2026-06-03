@@ -1,3 +1,4 @@
+pub mod autocopy;
 pub mod discovery;
 pub mod model;
 pub mod monitor;

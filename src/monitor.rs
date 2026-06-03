@@ -1,4 +1,5 @@
 use crate::{
+    autocopy::{AutoCopyConfig, AutoCopyEngine},
     discovery::WalletEvaluation,
     polymarket::{PolymarketDataClient, UserTrade},
     profile::{
@@ -14,6 +15,8 @@ use std::{
     thread::sleep,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+const AUTO_COPY_SOURCE_POSITION_RECONCILE_SECONDS: u64 = 30;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WatchedEmployee {
@@ -105,6 +108,7 @@ pub struct WatchRules {
     pub min_notional_usd: f64,
     pub max_entry_price: f64,
     pub follow_price_buffer: f64,
+    pub auto_copy: Option<AutoCopyConfig>,
     pub iterations: Option<usize>,
 }
 
@@ -121,6 +125,7 @@ impl Default for WatchRules {
             min_notional_usd: 100.0,
             max_entry_price: 0.75,
             follow_price_buffer: 0.05,
+            auto_copy: None,
             iterations: None,
         }
     }
@@ -222,7 +227,13 @@ pub fn analyze_employee_activity(
         .iter()
         .map(|employee| {
             let trades = client
-                .trades(&employee.wallet, trade_limit, 0, Some("BUY"))
+                .activity(&employee.wallet, trade_limit, 0)
+                .map(|trades| {
+                    trades
+                        .into_iter()
+                        .filter(|trade| trade.side.eq_ignore_ascii_case("BUY"))
+                        .collect::<Vec<_>>()
+                })
                 .unwrap_or_else(|error| {
                     eprintln!("failed to load activity for {}: {error}", employee.label());
                     Vec::new()
@@ -293,6 +304,7 @@ pub fn watch_employees(
     let mut next_heartbeat_at_secs =
         next_heartbeat_boundary_secs(now_secs(), rules.heartbeat_seconds);
     let mut last_alert_at: Option<u64> = None;
+    let mut last_auto_copy_position_reconcile: Option<Instant> = None;
     let mut last_polled = vec![None; employees.len()];
     let mut seeded = vec![false; employees.len()];
     let max_polls = rules.iterations.unwrap_or(usize::MAX);
@@ -305,6 +317,24 @@ pub fn watch_employees(
         .into_iter()
         .map(|snapshot| (snapshot.profile.wallet.clone(), snapshot.trades))
         .collect::<HashMap<_, _>>();
+    let mut auto_copy = rules
+        .auto_copy
+        .clone()
+        .filter(|config| config.enabled)
+        .and_then(|config| match AutoCopyEngine::new(config) {
+            Ok(engine) => {
+                println!(
+                    "WeatherHK auto-copy enabled: mode={}, state={}",
+                    engine.config().mode.label_for_display(),
+                    engine.config().state_path.display()
+                );
+                Some(engine)
+            }
+            Err(error) => {
+                eprintln!("WeatherHK auto-copy disabled: failed to load state: {error}");
+                None
+            }
+        });
 
     println!(
         "Watching {} employees, poll={}s, min_notional=${:.2}, max_entry={:.3}",
@@ -317,6 +347,47 @@ pub fn watch_employees(
 
     while polls_completed < max_polls {
         polls_completed += 1;
+        if let Some(engine) = auto_copy.as_mut() {
+            for report in engine.handle_tick() {
+                println!("{}", report.text);
+                flush_stdout();
+                if let Some(telegram) = telegram {
+                    if let Err(error) = telegram.send_message(&report.text) {
+                        eprintln!("failed to send Telegram auto-copy update: {error}");
+                    }
+                }
+                alerts_sent += 1;
+                last_alert_at = Some(now_secs());
+            }
+
+            if engine.has_pending_buy_orders()
+                && last_auto_copy_position_reconcile.map_or(true, |last| {
+                    last.elapsed()
+                        >= Duration::from_secs(AUTO_COPY_SOURCE_POSITION_RECONCILE_SECONDS)
+                })
+            {
+                last_auto_copy_position_reconcile = Some(Instant::now());
+                match load_source_position_assets(client, &engine.config().source_wallet) {
+                    Ok(source_assets) => {
+                        for report in
+                            engine.cancel_pending_buys_absent_from_source_positions(&source_assets)
+                        {
+                            println!("{}", report.text);
+                            flush_stdout();
+                            if let Some(telegram) = telegram {
+                                if let Err(error) = telegram.send_message(&report.text) {
+                                    eprintln!("failed to send Telegram auto-copy update: {error}");
+                                }
+                            }
+                            alerts_sent += 1;
+                            last_alert_at = Some(now_secs());
+                        }
+                    }
+                    Err(error) => eprintln!("failed to reconcile WeatherHK positions: {error}"),
+                }
+            }
+        }
+
         for (index, employee) in employees.iter().enumerate() {
             if !employee_is_due(employee, rules, last_polled[index]) {
                 continue;
@@ -324,7 +395,7 @@ pub fn watch_employees(
 
             let seed_only = !seeded[index];
             employee_polls_completed += 1;
-            let trades = match client.trades(&employee.wallet, rules.trade_limit, 0, None) {
+            let trades = match client.activity(&employee.wallet, rules.trade_limit, 0) {
                 Ok(trades) => {
                     last_polled[index] = Some(Instant::now());
                     trades
@@ -348,7 +419,53 @@ pub fn watch_employees(
 
                 let history = trade_histories.entry(employee.wallet.clone()).or_default();
 
-                if !seed_only {
+                if seed_only {
+                    if let Some(engine) = auto_copy.as_mut() {
+                        let now = now_secs();
+                        if engine.should_backfill_startup_trade(employee, &trade, now) {
+                            for report in engine.handle_trade(employee, &trade) {
+                                println!("{}", report.text);
+                                flush_stdout();
+                                if let Some(telegram) = telegram {
+                                    if let Err(error) = telegram.send_message(&report.text) {
+                                        eprintln!(
+                                            "failed to send Telegram auto-copy update: {error}"
+                                        );
+                                    }
+                                }
+                                alerts_sent += 1;
+                                last_alert_at = Some(now_secs());
+                            }
+                        }
+                    }
+                } else {
+                    let mut auto_copy_handled = false;
+                    if let Some(engine) = auto_copy.as_mut() {
+                        let reports = engine.handle_trade(employee, &trade);
+                        auto_copy_handled = !reports.is_empty();
+
+                        for report in reports {
+                            println!("{}", report.text);
+                            flush_stdout();
+                            if let Some(telegram) = telegram {
+                                if let Err(error) = telegram.send_message(&report.text) {
+                                    eprintln!("failed to send Telegram auto-copy update: {error}");
+                                }
+                            }
+                            alerts_sent += 1;
+                            last_alert_at = Some(now_secs());
+                        }
+                    }
+
+                    if auto_copy_handled {
+                        remember_trade(
+                            history,
+                            trade,
+                            rules.profile_trade_limit.max(rules.trade_limit),
+                        );
+                        continue;
+                    }
+
                     let profile = profiles.get(&employee.wallet);
                     let alert = if trade.side.eq_ignore_ascii_case("SELL") {
                         build_sell_alert(employee, &trade, rules, profile, history)
@@ -536,6 +653,36 @@ fn should_send_heartbeat(
     } else {
         false
     }
+}
+
+fn load_source_position_assets(
+    client: &PolymarketDataClient,
+    wallet: &str,
+) -> Result<HashSet<String>, String> {
+    let mut assets = HashSet::new();
+
+    for offset in [0, 50, 100, 150] {
+        let positions = client
+            .positions(wallet, 50, offset)
+            .map_err(|error| error.to_string())?;
+        let count = positions.len();
+
+        for position in positions {
+            if position.size.unwrap_or(0.0) <= 0.0 {
+                continue;
+            }
+
+            if let Some(asset) = position.asset.filter(|asset| !asset.trim().is_empty()) {
+                assets.insert(asset);
+            }
+        }
+
+        if count < 50 {
+            break;
+        }
+    }
+
+    Ok(assets)
 }
 
 fn next_heartbeat_boundary_secs(now_secs: u64, interval_secs: u64) -> u64 {

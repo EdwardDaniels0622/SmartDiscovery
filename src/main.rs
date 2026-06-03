@@ -1,4 +1,5 @@
 use smart_wallet_discovery::{
+    autocopy::{AutoCopyConfig, AutoCopyMode},
     discovery::{
         default_categories, discover_smart_money, scan_smart_money_employees, DiscoveryRunConfig,
         EmployeeScan, SmartMoneyConfig, SmartMoneyRoster,
@@ -13,6 +14,7 @@ use smart_wallet_discovery::{
     scoring::score_wallet,
     telegram::TelegramNotifier,
 };
+use std::{fs, path::PathBuf};
 
 #[derive(Debug, Clone)]
 struct DiscoverArgs {
@@ -58,6 +60,7 @@ struct WatchArgs {
     min_notional: f64,
     max_entry_price: f64,
     follow_price_buffer: f64,
+    auto_copy: AutoCopyConfig,
     stdout_only: bool,
     json: bool,
     proxy: ProxySetting,
@@ -118,6 +121,7 @@ impl Default for WatchArgs {
             min_notional: 100.0,
             max_entry_price: 0.75,
             follow_price_buffer: 0.05,
+            auto_copy: AutoCopyConfig::weatherhk_default(),
             stdout_only: false,
             json: false,
             proxy: ProxySetting::Default,
@@ -126,6 +130,7 @@ impl Default for WatchArgs {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    load_env_file();
     let args = std::env::args().skip(1).collect::<Vec<_>>();
 
     match args.first().map(String::as_str) {
@@ -153,6 +158,122 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+fn load_env_file() {
+    let path = std::env::var("SMART_WALLET_ENV_FILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(".env"));
+    let content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => {
+            eprintln!("failed to read env file {}: {error}", path.display());
+            return;
+        }
+    };
+
+    for (line_number, line) in content.lines().enumerate() {
+        let Some((key, value)) = parse_env_line(line) else {
+            continue;
+        };
+
+        if !is_valid_env_key(&key) {
+            eprintln!(
+                "ignored invalid env key in {}:{}",
+                path.display(),
+                line_number + 1
+            );
+            continue;
+        }
+
+        if std::env::var_os(&key).is_none() {
+            std::env::set_var(key, value);
+        }
+    }
+}
+
+fn parse_env_line(line: &str) -> Option<(String, String)> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+
+    let line = line.strip_prefix("export ").unwrap_or(line);
+    let (key, value) = line.split_once('=')?;
+    let key = key.trim().to_owned();
+    let value = parse_env_value(value.trim());
+
+    Some((key, value))
+}
+
+fn parse_env_value(value: &str) -> String {
+    if let Some(stripped) = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    {
+        return unescape_double_quoted_env(stripped);
+    }
+
+    if let Some(stripped) = value
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\''))
+    {
+        return stripped.to_owned();
+    }
+
+    strip_inline_comment(value).trim().to_owned()
+}
+
+fn strip_inline_comment(value: &str) -> &str {
+    let bytes = value.as_bytes();
+    for index in 0..bytes.len() {
+        if bytes[index] == b'#' && (index == 0 || bytes[index - 1].is_ascii_whitespace()) {
+            return &value[..index];
+        }
+    }
+
+    value
+}
+
+fn unescape_double_quoted_env(value: &str) -> String {
+    let mut output = String::new();
+    let mut chars = value.chars();
+
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            output.push(ch);
+            continue;
+        }
+
+        match chars.next() {
+            Some('n') => output.push('\n'),
+            Some('r') => output.push('\r'),
+            Some('t') => output.push('\t'),
+            Some('"') => output.push('"'),
+            Some('\\') => output.push('\\'),
+            Some(other) => {
+                output.push('\\');
+                output.push(other);
+            }
+            None => output.push('\\'),
+        }
+    }
+
+    output
+}
+
+fn is_valid_env_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return false;
+    }
+
+    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 fn run_demo() {
@@ -284,6 +405,11 @@ fn run_watch(args: WatchArgs) -> Result<(), Box<dyn std::error::Error>> {
         min_notional_usd: args.min_notional,
         max_entry_price: args.max_entry_price,
         follow_price_buffer: args.follow_price_buffer,
+        auto_copy: if args.auto_copy.enabled {
+            Some(args.auto_copy.clone())
+        } else {
+            None
+        },
         iterations: args.iterations,
     };
     let telegram = if args.stdout_only {
@@ -517,6 +643,18 @@ impl WatchArgs {
                 continue;
             }
 
+            if raw == "--weatherhk-auto-copy" {
+                args.auto_copy.enabled = true;
+                index += 1;
+                continue;
+            }
+
+            if raw == "--no-weatherhk-auto-copy" {
+                args.auto_copy.enabled = false;
+                index += 1;
+                continue;
+            }
+
             let (key, inline_value) = match raw.split_once('=') {
                 Some((key, value)) => (key, Some(value.to_owned())),
                 None => (raw.as_str(), None),
@@ -564,6 +702,64 @@ impl WatchArgs {
                 "--min-notional" => args.min_notional = parse_value(key, &value)?,
                 "--max-entry-price" => args.max_entry_price = parse_value(key, &value)?,
                 "--follow-price-buffer" => args.follow_price_buffer = parse_value(key, &value)?,
+                "--weatherhk-auto-copy-mode" => args.auto_copy.mode = AutoCopyMode::parse(&value)?,
+                "--weatherhk-auto-copy-exec" => {
+                    args.auto_copy.executor_command = Some(value);
+                }
+                "--weatherhk-state-path" | "--weatherhk-auto-copy-state-path" => {
+                    args.auto_copy.state_path = value.into();
+                }
+                "--weatherhk-max-single-copy" => {
+                    args.auto_copy.max_single_copy_usd = parse_value(key, &value)?
+                }
+                "--weatherhk-max-market-exposure" => {
+                    args.auto_copy.max_market_exposure_usd = parse_value(key, &value)?
+                }
+                "--weatherhk-max-daily-spend" => {
+                    args.auto_copy.max_daily_spend_usd = parse_value(key, &value)?
+                }
+                "--weatherhk-max-daily-loss" => {
+                    args.auto_copy.max_daily_loss_usd = parse_value(key, &value)?
+                }
+                "--weatherhk-max-chase-pct" => {
+                    args.auto_copy.max_chase_pct = parse_value(key, &value)?
+                }
+                "--weatherhk-passive-offset-pct" => {
+                    args.auto_copy.passive_offset_pct = parse_value(key, &value)?
+                }
+                "--weatherhk-max-chase-delta" => {
+                    args.auto_copy.max_chase_delta = parse_value(key, &value)?
+                }
+                "--weatherhk-passive-offset" => {
+                    args.auto_copy.passive_offset = parse_value(key, &value)?
+                }
+                "--weatherhk-buy-take-enabled" => {
+                    args.auto_copy.buy_take_enabled = parse_value(key, &value)?
+                }
+                "--weatherhk-min-buy-source-notional" => {
+                    args.auto_copy.min_buy_source_notional_usd = parse_value(key, &value)?
+                }
+                "--weatherhk-skip-buy-price-at-or-above" => {
+                    args.auto_copy.skip_buy_price_at_or_above = parse_value(key, &value)?
+                }
+                "--weatherhk-skip-buy-price-at-or-below" => {
+                    args.auto_copy.skip_buy_price_at_or_below = parse_value(key, &value)?
+                }
+                "--weatherhk-min-sell-sync-notional" => {
+                    args.auto_copy.min_sell_sync_notional_usd = parse_value(key, &value)?
+                }
+                "--weatherhk-passive-ttl" => {
+                    args.auto_copy.passive_order_ttl_seconds = parse_value(key, &value)?
+                }
+                "--weatherhk-pending-sync-seconds" => {
+                    args.auto_copy.pending_sync_seconds = parse_value(key, &value)?
+                }
+                "--weatherhk-sell-fraction" => {
+                    args.auto_copy.default_sell_fraction = parse_value(key, &value)?
+                }
+                "--weatherhk-clear-sell-notional" => {
+                    args.auto_copy.clear_sell_notional_usd = parse_value(key, &value)?
+                }
                 "--proxy" => args.proxy = parse_proxy_setting(&value),
                 unknown => return Err(format!("unknown argument: {unknown}")),
             }
@@ -571,6 +767,7 @@ impl WatchArgs {
             index += 1;
         }
 
+        args.auto_copy.validate()?;
         Ok(args)
     }
 }

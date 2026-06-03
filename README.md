@@ -143,6 +143,117 @@ The `profiles` command summarizes how an employee tends to make money and manage
 
 `watch` now loads the same profiles at startup by default and adds a copy-trade score, alert level, strategy summary, reasons, and cautions to each Telegram/stdout alert. Disable this with `--no-profiles` if you need the old lightweight watcher behavior.
 
+## WeatherHK Small Auto-Copy MVP
+
+The first auto-copy module is intentionally narrow: it only targets the `WeatherHK` wallet in `WEATHER` markets. It follows the small high-frequency behavior we discussed:
+
+- do not skip just because the trade is small, frequent, or repeated in the same market
+- skip source BUYs below 1U because copying them as a fixed 1U order over-amplifies tiny probes
+- size our order from WeatherHK's actual trade notional
+- cancel pending buy orders when WeatherHK sells the same market/outcome, or when source-position reconciliation shows WeatherHK no longer holds that asset
+- keep strict per-trade, per-market, daily spend, and daily realized-loss caps
+- persist positions, pending orders, processed source trades, and execution logs in a local state file
+- use `/activity` for live user activity because `/trades` can miss or lag WeatherHK maker/high-frequency fills
+
+Default amount tiers:
+
+```text
+WeatherHK < 10U      => copy 1U
+10U <= WeatherHK <30 => copy 2U
+30U <= WeatherHK <60 => copy 3U
+60U <= WeatherHK <100 => copy 5U
+100U <= WeatherHK <200 => copy 8U
+WeatherHK >= 200U   => copy 10U
+```
+
+Configure local secrets with `.env`:
+
+```bash
+cp .env.example .env
+```
+
+Then fill at least these values in `.env` before live trading:
+
+```dotenv
+POLYMARKET_PRIVATE_KEY=
+POLYMARKET_FUNDER_ADDRESS=
+POLYMARKET_SIGNATURE_TYPE=2
+POLYMARKET_CHAIN_ID=137
+POLYMARKET_CLOB_HOST=https://clob.polymarket.com
+```
+
+`.env` is ignored by git. The watcher loads it at startup and passes those variables to the external executor command. Shell environment variables still win if the same key is already set. Use `SMART_WALLET_ENV_FILE=/path/to/file` to load a different env file.
+
+The WeatherHK auto-copy caps can also live in `.env` via keys such as `WEATHERHK_AUTO_COPY_ENABLED`, `WEATHERHK_AUTO_COPY_MODE`, `WEATHERHK_AUTO_COPY_EXEC`, `WEATHERHK_MAX_MARKET_EXPOSURE_USD`, `WEATHERHK_MAX_DAILY_SPEND_USD`, `WEATHERHK_MAX_CHASE_PCT`, and `WEATHERHK_MAX_CHASE_DELTA`. Price chasing is percentage-first, with the delta value used as an absolute cap. CLI flags override these defaults when provided.
+
+Dry-run the WeatherHK logic without placing orders:
+
+```bash
+cargo run -- watch \
+  --employee '0x488c725253fc21c7a9ca812030dc2f6343f98c1c:WeatherHK:WEATHER:weather|temperature|hurricane|storm|rain|snow:10:1' \
+  --weatherhk-auto-copy \
+  --weatherhk-auto-copy-mode dry-run \
+  --poll-seconds 10
+```
+
+Live mode delegates trading to an external executor command. The watcher sends a JSON request on stdin and expects a small JSON result on stdout:
+
+```bash
+cargo run -- watch \
+  --employee '0x488c725253fc21c7a9ca812030dc2f6343f98c1c:WeatherHK:WEATHER:weather|temperature|hurricane|storm|rain|snow:10:1' \
+  --weatherhk-auto-copy \
+  --weatherhk-auto-copy-mode live-external \
+  --weatherhk-auto-copy-exec './scripts/polymarket_executor.sh' \
+  --weatherhk-max-market-exposure 50 \
+  --weatherhk-max-daily-spend 200 \
+  --weatherhk-max-daily-loss 50 \
+  --weatherhk-max-chase-pct 0.15 \
+  --weatherhk-passive-offset-pct 0.05 \
+  --weatherhk-max-chase-delta 0.03 \
+  --weatherhk-passive-offset 0.02 \
+  --weatherhk-buy-take-enabled true \
+  --weatherhk-min-buy-source-notional 1 \
+  --weatherhk-skip-buy-price-at-or-above 0.98 \
+  --weatherhk-skip-buy-price-at-or-below 0.005 \
+  --weatherhk-min-sell-sync-notional 1 \
+  --weatherhk-passive-ttl 0
+```
+
+For a BUY request, the external executor should:
+
+1. Check the current best ask for the requested asset.
+2. If `take_enabled` is true and ask is at or below `direct_limit_price`, buy immediately.
+3. Otherwise place a passive limit buy at `passive_limit_price`.
+4. Return `filled`, `pending`, `skipped`, or `failed`.
+
+For WeatherHK, `take_enabled` is normally true for small-copy mode. If the current best ask is cheaper than or equal to the direct chase limit, the follower should buy instead of skipping a better price. If the ask is above the direct limit or unavailable, the executor places a passive post-only buy at the passive limit.
+
+WeatherHK BUYs below `WEATHERHK_MIN_BUY_SOURCE_NOTIONAL_USD` are skipped by default. BUYs at or above `WEATHERHK_SKIP_BUY_PRICE_AT_OR_ABOVE` are skipped by default. This avoids copying very high probability / very low edge trades, such as 98c-99c entries where the remaining payout is too thin for a follower. BUYs at or below `WEATHERHK_SKIP_BUY_PRICE_AT_OR_BELOW` are also skipped to avoid near-zero tail-risk or stale-maker-noise entries; the default is 0.5c.
+
+WeatherHK SELLs below `WEATHERHK_MIN_SELL_SYNC_NOTIONAL_USD` are treated as dust for position selling, but still cancel matching pending BUY orders first.
+
+Set `WEATHERHK_PASSIVE_TTL_SECONDS=0` to keep passive BUY orders open until a WeatherHK sell, source-position reconciliation, or another explicit risk event cancels them. Routine pending syncs do not send Telegram messages; only fills, cancels, failures, and partial-fill progress are reported.
+
+For a SELL request, it should sell the requested shares at or above `min_sell_price`. For `cancel` and `sync`, it should cancel or report the state of a prior pending order.
+
+Example executor response:
+
+```json
+{
+  "status": "filled",
+  "order_id": "clob-order-id",
+  "filled_amount_usd": 2.0,
+  "filled_size": 4.7619,
+  "filled_price": 0.42,
+  "realized_pnl_usd": null,
+  "message": "filled at best ask"
+}
+```
+
+Supported status values include `filled`, `pending`, `submitted`, `cancelled`, `skipped`, and `failed`. Pending BUY orders are synced periodically and cancelled when TTL expires, unless TTL is `0`, or when WeatherHK sells the same market/outcome.
+
+The module still does not store private keys or sign orders. It is a watcher, risk gate, state tracker, and executor dispatcher.
+
 ## Next Build Step
 
 The next useful module is a `PolymarketDataClient` adapter:
