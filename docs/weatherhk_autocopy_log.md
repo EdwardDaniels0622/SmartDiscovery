@@ -95,6 +95,17 @@
   - WeatherHK 启动脚本增加 `--trade-limit 100`。
   - 增加 source-position reconcile：如果 WeatherHK 当前持仓不再包含 pending BUY 的 asset，则取消该 pending BUY。
 
+### 8. SELL 执行失败导致 Telegram 刷屏
+
+- 现象：WeatherHK 对同一市场连续拆单卖出时，我方 SELL 同步因 CLOB 返回 `not enough balance / allowance` 失败，watcher 对每笔源 SELL 都重复发送 `[WeatherHK 自动跟随跳过] 状态: failed`。
+- 原因：
+  - `failed` 被错误显示成“跳过”，用户无法区分主动风控跳过和执行失败。
+  - 对同一 market/outcome 的 SELL 执行失败没有冷却，后续拆单 SELL 会继续重复尝试并重复通知。
+- 修复：
+  - `failed` 文案改为“失败”，不再显示成“跳过”。
+  - 新增 `WEATHERHK_FAILED_ACTION_COOLDOWN_SECONDS`，默认 `900` 秒；同一 action + market/outcome 在冷却期内不再重复执行失败动作。
+  - 同类 failed 报告在冷却期内只发第一条，避免 Telegram 刷屏和 429 限流。
+
 ## 运行与部署
 
 - LaunchAgent：`com.smartwallet.weatherhk.autocopy`
@@ -107,5 +118,6 @@
 ## 待观察
 
 - Telegram 429 后需要等待冷却，避免重复 pending 通知。
+- SELL 失败冷却只是止血；如果继续出现 `not enough balance / allowance`，需要核对实际 CLOB 持仓/allowance 与本地状态文件是否一致。
 - `/activity` 比 `/trades` 更实时，但仍需继续观察是否存在漏单。
 - 对天气阶梯市场，可以继续评估“同城市/同日期/同温度系列”联动撤单规则，但第一版先以同 asset 和源持仓对账为主。

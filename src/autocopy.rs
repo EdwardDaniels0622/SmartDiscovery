@@ -13,6 +13,7 @@ const WEATHERHK_WALLET: &str = "0x488c725253fc21c7a9ca812030dc2f6343f98c1c";
 const DEFAULT_STATE_PATH: &str = "logs/weatherhk_autocopy_state.json";
 const STATE_LOG_LIMIT: usize = 500;
 const PROCESSED_TRADE_LIMIT: usize = 1_000;
+const FAILURE_COOLDOWN_LIMIT: usize = 200;
 const MIN_COPY_AMOUNT_USD: f64 = 1.0;
 const SOURCE_POSITION_RECONCILE_GRACE_SECONDS: u64 = 60;
 
@@ -43,6 +44,7 @@ pub struct AutoCopyConfig {
     pub pending_sync_seconds: u64,
     pub default_sell_fraction: f64,
     pub clear_sell_notional_usd: f64,
+    pub failed_action_cooldown_seconds: u64,
 }
 
 impl AutoCopyConfig {
@@ -85,6 +87,10 @@ impl AutoCopyConfig {
             pending_sync_seconds: env_u64("WEATHERHK_PENDING_SYNC_SECONDS", 30),
             default_sell_fraction: env_f64("WEATHERHK_SELL_FRACTION", 0.50),
             clear_sell_notional_usd: env_f64("WEATHERHK_CLEAR_SELL_NOTIONAL_USD", 60.0),
+            failed_action_cooldown_seconds: env_u64(
+                "WEATHERHK_FAILED_ACTION_COOLDOWN_SECONDS",
+                900,
+            ),
         }
     }
 
@@ -265,11 +271,13 @@ impl AutoCopyEngine {
 
         let mut reports = Vec::new();
         for order in orders {
-            reports.extend(self.cancel_pending_order(
+            for report in self.cancel_pending_order(
                 &order,
                 "WeatherHK 当前已不持有该 outcome，取消未成交跟单买单",
                 now,
-            ));
+            ) {
+                self.push_report(report, &mut reports, now);
+            }
         }
 
         self.persist_if_needed(&mut reports);
@@ -311,11 +319,10 @@ impl AutoCopyEngine {
         };
 
         for report in trade_reports {
-            self.state.append_log(&report);
-            reports.push(report);
+            self.push_report(report, &mut reports, now);
         }
 
-        self.persist_if_needed(&mut reports);
+        self.persist(&mut reports);
         reports
     }
 
@@ -508,6 +515,15 @@ impl AutoCopyEngine {
             return reports;
         }
 
+        let failure_key = action_failure_cooldown_key("SELL", &key);
+        if self.state.failure_in_cooldown(
+            &failure_key,
+            now,
+            self.config.failed_action_cooldown_seconds,
+        ) {
+            return reports;
+        }
+
         let sell_fraction = if source_notional >= self.config.clear_sell_notional_usd {
             1.0
         } else {
@@ -538,6 +554,21 @@ impl AutoCopyEngine {
         );
 
         self.apply_sell_execution(&key, sell_size, source_price, &execution, &mut report);
+        if execution.status == ExecutionStatus::Failed {
+            self.state.record_failure(
+                failure_key,
+                execution
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| report.reason.clone()),
+                now,
+            );
+        } else if matches!(
+            execution.status,
+            ExecutionStatus::Filled | ExecutionStatus::DryRun | ExecutionStatus::Cancelled
+        ) {
+            self.state.clear_failure(&failure_key);
+        }
         report.market_exposure_after_usd = self.state.market_exposure_usd(&key);
         report.daily_spend_after_usd =
             self.state.daily_spend_usd + self.state.daily_reserved_buy_usd();
@@ -579,7 +610,7 @@ impl AutoCopyEngine {
             report.daily_spend_after_usd =
                 self.state.daily_spend_usd + self.state.daily_reserved_buy_usd();
             if should_notify {
-                reports.push(report);
+                self.push_report(report, &mut reports, now);
             }
         }
 
@@ -604,7 +635,9 @@ impl AutoCopyEngine {
             let Some(order) = self.state.pending_order(&local_order_id).cloned() else {
                 continue;
             };
-            reports.extend(self.cancel_pending_order(&order, "挂单 TTL 到期", now));
+            for report in self.cancel_pending_order(&order, "挂单 TTL 到期", now) {
+                self.push_report(report, &mut reports, now);
+            }
         }
 
         reports
@@ -652,7 +685,6 @@ impl AutoCopyEngine {
         report.daily_spend_after_usd =
             self.state.daily_spend_usd + self.state.daily_reserved_buy_usd();
 
-        self.state.append_log(&report);
         vec![report]
     }
 
@@ -1125,11 +1157,44 @@ WeatherHK: {} {:.2}U @ {:.2}c",
             return;
         }
 
+        self.persist(reports);
+    }
+
+    fn persist(&self, reports: &mut Vec<AutoCopyReport>) {
         if let Err(error) = self.state.save(&self.config.state_path) {
             reports.push(AutoCopyReport::system(format!(
                 "[WeatherHK 自动跟随状态保存失败]\n原因: {error}"
             )));
         }
+    }
+
+    fn push_report(&mut self, report: AutoCopyReport, reports: &mut Vec<AutoCopyReport>, now: u64) {
+        self.state.append_log(&report);
+        if self.should_emit_report(&report, now) {
+            reports.push(report);
+        }
+    }
+
+    fn should_emit_report(&mut self, report: &AutoCopyReport, now: u64) -> bool {
+        if !report.status.eq_ignore_ascii_case("failed") {
+            return true;
+        }
+
+        let cooldown_seconds = self.config.failed_action_cooldown_seconds;
+        if cooldown_seconds == 0 {
+            return true;
+        }
+
+        let key = report_failure_cooldown_key(report);
+        if self
+            .state
+            .failure_in_cooldown(&key, now, cooldown_seconds)
+        {
+            return false;
+        }
+
+        self.state.record_failure(key, report.reason.clone(), now);
+        true
     }
 }
 
@@ -1142,6 +1207,8 @@ pub struct AutoCopyState {
     pub pending_orders: Vec<PendingCopyOrder>,
     pub processed_source_trades: Vec<String>,
     pub logs: Vec<AutoCopyLog>,
+    #[serde(default)]
+    pub failure_cooldowns: Vec<AutoCopyFailureCooldown>,
 }
 
 impl Default for AutoCopyState {
@@ -1154,6 +1221,7 @@ impl Default for AutoCopyState {
             pending_orders: Vec::new(),
             processed_source_trades: Vec::new(),
             logs: Vec::new(),
+            failure_cooldowns: Vec::new(),
         }
     }
 }
@@ -1373,6 +1441,49 @@ impl AutoCopyState {
             self.logs.drain(0..excess);
         }
     }
+
+    fn failure_in_cooldown(&self, key: &str, now: u64, cooldown_seconds: u64) -> bool {
+        if cooldown_seconds == 0 {
+            return false;
+        }
+
+        if let Some(cooldown) = self
+            .failure_cooldowns
+            .iter()
+            .find(|cooldown| cooldown.key == key)
+        {
+            now.saturating_sub(cooldown.last_failed_at_secs) < cooldown_seconds
+        } else {
+            false
+        }
+    }
+
+    fn record_failure(&mut self, key: String, message: String, now: u64) {
+        if let Some(cooldown) = self
+            .failure_cooldowns
+            .iter_mut()
+            .find(|cooldown| cooldown.key == key)
+        {
+            cooldown.last_failed_at_secs = now;
+            cooldown.message = message;
+        } else {
+            self.failure_cooldowns.push(AutoCopyFailureCooldown {
+                key,
+                last_failed_at_secs: now,
+                message,
+            });
+        }
+
+        if self.failure_cooldowns.len() > FAILURE_COOLDOWN_LIMIT {
+            let excess = self.failure_cooldowns.len() - FAILURE_COOLDOWN_LIMIT;
+            self.failure_cooldowns.drain(0..excess);
+        }
+    }
+
+    fn clear_failure(&mut self, key: &str) {
+        self.failure_cooldowns
+            .retain(|cooldown| cooldown.key != key);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1431,6 +1542,13 @@ pub struct AutoCopyLog {
     pub copy_price: Option<f64>,
     pub order_id: Option<String>,
     pub realized_pnl_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoCopyFailureCooldown {
+    pub key: String,
+    pub last_failed_at_secs: u64,
+    pub message: String,
 }
 
 #[derive(Debug, Clone)]
@@ -2039,7 +2157,8 @@ fn action_label(action: &str) -> &'static str {
 
 fn report_action_label(action: &str, status: ExecutionStatus) -> &'static str {
     match status {
-        ExecutionStatus::Skipped | ExecutionStatus::Failed => "跳过",
+        ExecutionStatus::Skipped => "跳过",
+        ExecutionStatus::Failed => "失败",
         _ => action_label(action),
     }
 }
@@ -2047,12 +2166,26 @@ fn report_action_label(action: &str, status: ExecutionStatus) -> &'static str {
 fn copy_action_label(action: &str, status: ExecutionStatus) -> &'static str {
     match (action, status) {
         ("BUY", ExecutionStatus::Pending | ExecutionStatus::Submitted) => "挂单/提交",
-        ("BUY", ExecutionStatus::Skipped | ExecutionStatus::Failed) => "跳过",
+        ("BUY", ExecutionStatus::Skipped) => "跳过",
+        ("BUY", ExecutionStatus::Failed) => "失败",
         ("BUY", _) => "买入",
-        ("SELL", ExecutionStatus::Skipped | ExecutionStatus::Failed) => "跳过",
+        ("SELL", ExecutionStatus::Skipped) => "跳过",
+        ("SELL", ExecutionStatus::Failed) => "失败",
         ("SELL", _) => "卖出",
         _ => "操作",
     }
+}
+
+fn action_failure_cooldown_key(action: &str, position_key: &str) -> String {
+    format!("action:{action}:{position_key}")
+}
+
+fn report_failure_cooldown_key(report: &AutoCopyReport) -> String {
+    let reason = report.reason.split_whitespace().collect::<Vec<_>>().join(" ");
+    format!(
+        "report:{}:{}:{}",
+        report.action, report.position_key, reason
+    )
 }
 
 fn pending_action_label(action: &str) -> &'static str {
@@ -2247,6 +2380,43 @@ mod tests {
 
         assert!((state.daily_reserved_buy_usd() - 3.0).abs() < f64::EPSILON);
         assert!((state.market_exposure_usd("market:asset") - 3.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn failure_cooldown_blocks_repeated_failures() {
+        let mut state = AutoCopyState::default();
+
+        assert!(!state.failure_in_cooldown("sell:market", 100, 900));
+        state.record_failure("sell:market".to_owned(), "not enough balance".to_owned(), 100);
+
+        assert!(state.failure_in_cooldown("sell:market", 150, 900));
+        assert!(!state.failure_in_cooldown("sell:market", 1_000, 900));
+
+        state.clear_failure("sell:market");
+        assert!(!state.failure_in_cooldown("sell:market", 150, 900));
+    }
+
+    #[test]
+    fn old_state_json_without_failure_cooldowns_still_loads() {
+        let json = r#"{
+            "day_bucket": 1,
+            "daily_spend_usd": 0.0,
+            "daily_realized_pnl_usd": 0.0,
+            "positions": [],
+            "pending_orders": [],
+            "processed_source_trades": [],
+            "logs": []
+        }"#;
+
+        let state: AutoCopyState = serde_json::from_str(json).unwrap();
+
+        assert!(state.failure_cooldowns.is_empty());
+    }
+
+    #[test]
+    fn failed_status_is_labelled_as_failure_not_skip() {
+        assert_eq!(report_action_label("SELL", ExecutionStatus::Failed), "失败");
+        assert_eq!(copy_action_label("SELL", ExecutionStatus::Failed), "失败");
     }
 
     fn assert_near(left: f64, right: f64) {
