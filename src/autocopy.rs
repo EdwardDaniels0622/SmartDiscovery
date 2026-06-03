@@ -14,6 +14,7 @@ const DEFAULT_STATE_PATH: &str = "logs/weatherhk_autocopy_state.json";
 const STATE_LOG_LIMIT: usize = 500;
 const PROCESSED_TRADE_LIMIT: usize = 1_000;
 const FAILURE_COOLDOWN_LIMIT: usize = 200;
+const SOURCE_FLOW_LIMIT: usize = 500;
 const MIN_COPY_AMOUNT_USD: f64 = 1.0;
 const SOURCE_POSITION_RECONCILE_GRACE_SECONDS: u64 = 60;
 
@@ -45,6 +46,13 @@ pub struct AutoCopyConfig {
     pub default_sell_fraction: f64,
     pub clear_sell_notional_usd: f64,
     pub failed_action_cooldown_seconds: u64,
+    pub source_flow_window_seconds: u64,
+    pub post_sell_buy_guard_seconds: u64,
+    pub source_pressure_cooldown_seconds: u64,
+    pub source_pressure_min_sell_count: usize,
+    pub source_pressure_min_sell_notional_usd: f64,
+    pub source_pressure_max_avg_sell_gap_seconds: u64,
+    pub source_reentry_alert_buy_usd: f64,
 }
 
 impl AutoCopyConfig {
@@ -91,6 +99,25 @@ impl AutoCopyConfig {
                 "WEATHERHK_FAILED_ACTION_COOLDOWN_SECONDS",
                 900,
             ),
+            source_flow_window_seconds: env_u64("WEATHERHK_SOURCE_FLOW_WINDOW_SECONDS", 120),
+            post_sell_buy_guard_seconds: env_u64("WEATHERHK_POST_SELL_BUY_GUARD_SECONDS", 120),
+            source_pressure_cooldown_seconds: env_u64(
+                "WEATHERHK_SOURCE_PRESSURE_COOLDOWN_SECONDS",
+                300,
+            ),
+            source_pressure_min_sell_count: env_usize(
+                "WEATHERHK_SOURCE_PRESSURE_MIN_SELL_COUNT",
+                3,
+            ),
+            source_pressure_min_sell_notional_usd: env_f64(
+                "WEATHERHK_SOURCE_PRESSURE_MIN_SELL_NOTIONAL_USD",
+                3.0,
+            ),
+            source_pressure_max_avg_sell_gap_seconds: env_u64(
+                "WEATHERHK_SOURCE_PRESSURE_MAX_AVG_SELL_GAP_SECONDS",
+                30,
+            ),
+            source_reentry_alert_buy_usd: env_f64("WEATHERHK_SOURCE_REENTRY_ALERT_BUY_USD", 30.0),
         }
     }
 
@@ -155,6 +182,15 @@ impl AutoCopyConfig {
         }
         if !(0.0..=1.0).contains(&self.default_sell_fraction) || self.default_sell_fraction <= 0.0 {
             return Err("WeatherHK sell fraction must be greater than 0 and <= 1".to_owned());
+        }
+        if self.source_pressure_min_sell_count == 0 {
+            return Err("WeatherHK source pressure sell count must be > 0".to_owned());
+        }
+        if self.source_pressure_min_sell_notional_usd < 0.0 {
+            return Err("WeatherHK source pressure sell notional must be >= 0".to_owned());
+        }
+        if self.source_reentry_alert_buy_usd < 0.0 {
+            return Err("WeatherHK source reentry alert buy amount must be >= 0".to_owned());
         }
 
         Ok(())
@@ -303,11 +339,15 @@ impl AutoCopyEngine {
         if self.state.has_processed_source_trade(&source_key) {
             return reports;
         }
-        self.state.remember_processed_source_trade(source_key);
+        self.state.remember_processed_source_trade(source_key.clone());
+        let event_time = trade.timestamp.unwrap_or(now);
+        self.state
+            .prune_source_memory(event_time, self.source_memory_retention_seconds());
+        self.state.record_source_flow(trade, source_key.clone(), now);
 
         let side = trade.side.to_uppercase();
         let trade_reports = if side == "BUY" {
-            self.handle_buy(trade, now)
+            self.handle_buy(trade, now, event_time)
         } else if side == "SELL" {
             self.handle_sell(trade, now)
         } else {
@@ -326,6 +366,13 @@ impl AutoCopyEngine {
         reports
     }
 
+    fn source_memory_retention_seconds(&self) -> u64 {
+        self.config
+            .source_flow_window_seconds
+            .max(self.config.post_sell_buy_guard_seconds)
+            .max(self.config.source_pressure_cooldown_seconds)
+    }
+
     fn should_handle(&self, employee: &WatchedEmployee, trade: &UserTrade) -> bool {
         if !self.config.enabled {
             return false;
@@ -342,7 +389,7 @@ impl AutoCopyEngine {
         matches_employee_keywords(employee, trade)
     }
 
-    fn handle_buy(&mut self, trade: &UserTrade, now: u64) -> Vec<AutoCopyReport> {
+    fn handle_buy(&mut self, trade: &UserTrade, now: u64, event_time: u64) -> Vec<AutoCopyReport> {
         let Some(source_price) = trade.price.filter(|price| *price > 0.0 && *price < 1.0) else {
             return vec![self.skip_report("缺少价格", trade, "WeatherHK BUY 缺少有效成交价格。")];
         };
@@ -390,6 +437,12 @@ impl AutoCopyEngine {
         let mut copy_amount =
             copy_amount_for_source_notional(source_notional).min(self.config.max_single_copy_usd);
         let key = position_key(trade);
+        if let Some((title, reason)) =
+            self.source_buy_guard_reason(&key, source_notional, event_time)
+        {
+            return vec![self.skip_report(title, trade, reason)];
+        }
+
         let market_exposure = self.state.market_exposure_usd(&key);
         let daily_reserved = self.state.daily_reserved_buy_usd();
         let remaining_market = self.config.max_market_exposure_usd - market_exposure;
@@ -483,6 +536,10 @@ impl AutoCopyEngine {
             .filter(|size| *size > 0.0)
             .map(|size| source_price * size)
             .unwrap_or(0.0);
+        if !should_skip_dust_sell(source_notional, self.config.min_sell_sync_notional_usd) {
+            self.update_source_sell_guard(&key, source_notional, trade.timestamp.unwrap_or(now));
+        }
+
         let mut reports = self.cancel_pending_for_key(&key, "WeatherHK 已卖出/减仓", now);
         if should_skip_dust_sell(source_notional, self.config.min_sell_sync_notional_usd) {
             reports.push(self.skip_report(
@@ -574,6 +631,74 @@ impl AutoCopyEngine {
             self.state.daily_spend_usd + self.state.daily_reserved_buy_usd();
         reports.push(report);
         reports
+    }
+
+    fn source_buy_guard_reason(
+        &self,
+        key: &str,
+        source_notional: f64,
+        now: u64,
+    ) -> Option<(&'static str, String)> {
+        let guard = self.state.active_source_guard(key, now)?;
+        let title = if source_notional >= self.config.source_reentry_alert_buy_usd {
+            "可能重新建仓"
+        } else {
+            "卖压冷却"
+        };
+        let buy_label = if source_notional >= self.config.source_reentry_alert_buy_usd {
+            format!(
+                "当前 BUY {:.2}U 达到重新建仓提醒线 {:.2}U；初版先提醒/跳过，不自动追入，等这个 outcome 的卖压冷却结束后再恢复正常评估。",
+                source_notional, self.config.source_reentry_alert_buy_usd
+            )
+        } else {
+            format!(
+                "当前 BUY {:.2}U 低于重新建仓提醒线 {:.2}U，更像卖出后的试探/库存回补/碎片成交。",
+                source_notional, self.config.source_reentry_alert_buy_usd
+            )
+        };
+
+        Some((
+            title,
+            format!(
+                "{}；{} 保护只作用于这个 exact outcome，不影响其他温度档位。",
+                guard.reason, buy_label
+            ),
+        ))
+    }
+
+    fn update_source_sell_guard(&mut self, key: &str, source_notional: f64, event_time: u64) {
+        let stats =
+            self.state
+                .source_flow_stats(key, event_time, self.config.source_flow_window_seconds);
+        if source_pressure_detected(&stats, &self.config) {
+            let reason = format!(
+                "同 outcome 在过去 {:.0}s 内连续 SELL {} 笔 / {:.2}U，平均间隔 {:.1}s；这更像挂单被吃、止盈出货或程序化库存调整。",
+                self.config.source_flow_window_seconds,
+                stats.sell_count,
+                stats.sell_notional_usd,
+                stats.avg_sell_gap_seconds().unwrap_or(0.0)
+            );
+            self.state.record_source_guard(
+                key.to_owned(),
+                SourceGuardKind::Pressure,
+                reason,
+                event_time,
+                self.config.source_pressure_cooldown_seconds,
+            );
+            return;
+        }
+
+        let reason = format!(
+            "WeatherHK 刚刚卖出同 outcome {:.2}U；第一笔 SELL 已先触发撤挂单/同步卖出，短窗口内暂停跟同 outcome 的后续 BUY。",
+            source_notional
+        );
+        self.state.record_source_guard(
+            key.to_owned(),
+            SourceGuardKind::PostSell,
+            reason,
+            event_time,
+            self.config.post_sell_buy_guard_seconds,
+        );
     }
 
     fn sync_pending_orders(&mut self, now: u64) -> Vec<AutoCopyReport> {
@@ -1209,6 +1334,10 @@ pub struct AutoCopyState {
     pub logs: Vec<AutoCopyLog>,
     #[serde(default)]
     pub failure_cooldowns: Vec<AutoCopyFailureCooldown>,
+    #[serde(default)]
+    pub recent_source_flows: Vec<SourceFlowEvent>,
+    #[serde(default)]
+    pub source_guards: Vec<SourceOutcomeGuard>,
 }
 
 impl Default for AutoCopyState {
@@ -1222,6 +1351,8 @@ impl Default for AutoCopyState {
             processed_source_trades: Vec::new(),
             logs: Vec::new(),
             failure_cooldowns: Vec::new(),
+            recent_source_flows: Vec::new(),
+            source_guards: Vec::new(),
         }
     }
 }
@@ -1484,6 +1615,133 @@ impl AutoCopyState {
         self.failure_cooldowns
             .retain(|cooldown| cooldown.key != key);
     }
+
+    fn prune_source_memory(&mut self, now: u64, retention_seconds: u64) {
+        self.recent_source_flows.retain(|flow| {
+            retention_seconds == 0 || now.saturating_sub(flow.timestamp_secs) <= retention_seconds
+        });
+        self.source_guards
+            .retain(|guard| guard.expires_at_secs == 0 || guard.expires_at_secs > now);
+    }
+
+    fn record_source_flow(&mut self, trade: &UserTrade, source_trade_key: String, now: u64) {
+        if self
+            .recent_source_flows
+            .iter()
+            .any(|flow| flow.source_trade_key == source_trade_key)
+        {
+            return;
+        }
+
+        let price = trade.price.unwrap_or(0.0);
+        let notional_usd = trade
+            .size
+            .filter(|size| *size > 0.0)
+            .map(|size| size * price)
+            .unwrap_or(0.0);
+
+        self.recent_source_flows.push(SourceFlowEvent {
+            source_trade_key,
+            position_key: position_key(trade),
+            side: trade.side.to_uppercase(),
+            notional_usd,
+            price: trade.price,
+            timestamp_secs: trade.timestamp.unwrap_or(now),
+            recorded_at_secs: now,
+        });
+
+        if self.recent_source_flows.len() > SOURCE_FLOW_LIMIT {
+            let excess = self.recent_source_flows.len() - SOURCE_FLOW_LIMIT;
+            self.recent_source_flows.drain(0..excess);
+        }
+    }
+
+    fn source_flow_stats(
+        &self,
+        position_key: &str,
+        now: u64,
+        window_seconds: u64,
+    ) -> SourceFlowStats {
+        let mut stats = SourceFlowStats::default();
+        for flow in &self.recent_source_flows {
+            if flow.position_key != position_key {
+                continue;
+            }
+            if window_seconds > 0 && now.saturating_sub(flow.timestamp_secs) > window_seconds {
+                continue;
+            }
+
+            match flow.side.as_str() {
+                "BUY" => {
+                    stats.buy_count += 1;
+                    stats.buy_notional_usd += flow.notional_usd;
+                }
+                "SELL" => {
+                    stats.sell_count += 1;
+                    stats.sell_notional_usd += flow.notional_usd;
+                    stats.first_sell_at_secs = Some(
+                        stats
+                            .first_sell_at_secs
+                            .map_or(flow.timestamp_secs, |first| first.min(flow.timestamp_secs)),
+                    );
+                    stats.last_sell_at_secs = Some(
+                        stats
+                            .last_sell_at_secs
+                            .map_or(flow.timestamp_secs, |last| last.max(flow.timestamp_secs)),
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        stats
+    }
+
+    fn active_source_guard(&self, position_key: &str, now: u64) -> Option<&SourceOutcomeGuard> {
+        self.source_guards.iter().find(|guard| {
+            guard.position_key == position_key
+                && (guard.expires_at_secs == 0 || guard.expires_at_secs > now)
+        })
+    }
+
+    fn record_source_guard(
+        &mut self,
+        position_key: String,
+        kind: SourceGuardKind,
+        reason: String,
+        event_time: u64,
+        guard_seconds: u64,
+    ) {
+        if guard_seconds == 0 {
+            return;
+        }
+
+        let expires_at_secs = event_time.saturating_add(guard_seconds);
+        if let Some(guard) = self
+            .source_guards
+            .iter_mut()
+            .find(|guard| guard.position_key == position_key)
+        {
+            if guard.kind == SourceGuardKind::Pressure && kind == SourceGuardKind::PostSell {
+                guard.expires_at_secs = guard.expires_at_secs.max(expires_at_secs);
+                return;
+            }
+
+            guard.kind = kind;
+            guard.reason = reason;
+            guard.created_at_secs = event_time;
+            guard.expires_at_secs = expires_at_secs;
+            return;
+        }
+
+        self.source_guards.push(SourceOutcomeGuard {
+            position_key,
+            kind,
+            reason,
+            created_at_secs: event_time,
+            expires_at_secs,
+        });
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1549,6 +1807,55 @@ pub struct AutoCopyFailureCooldown {
     pub key: String,
     pub last_failed_at_secs: u64,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceFlowEvent {
+    pub source_trade_key: String,
+    pub position_key: String,
+    pub side: String,
+    pub notional_usd: f64,
+    pub price: Option<f64>,
+    pub timestamp_secs: u64,
+    pub recorded_at_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceOutcomeGuard {
+    pub position_key: String,
+    pub kind: SourceGuardKind,
+    pub reason: String,
+    pub created_at_secs: u64,
+    pub expires_at_secs: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SourceGuardKind {
+    PostSell,
+    Pressure,
+}
+
+#[derive(Debug, Default, Clone)]
+struct SourceFlowStats {
+    buy_count: usize,
+    sell_count: usize,
+    buy_notional_usd: f64,
+    sell_notional_usd: f64,
+    first_sell_at_secs: Option<u64>,
+    last_sell_at_secs: Option<u64>,
+}
+
+impl SourceFlowStats {
+    fn avg_sell_gap_seconds(&self) -> Option<f64> {
+        if self.sell_count < 2 {
+            return None;
+        }
+
+        let first = self.first_sell_at_secs?;
+        let last = self.last_sell_at_secs?;
+        Some(last.saturating_sub(first) as f64 / (self.sell_count - 1) as f64)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1981,6 +2288,18 @@ fn env_u64(key: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
+fn env_usize(key: &str, default: usize) -> usize {
+    env_string(key)
+        .and_then(|value| match value.parse::<usize>() {
+            Ok(parsed) => Some(parsed),
+            Err(error) => {
+                eprintln!("invalid integer for {key}: {error}; using {default}");
+                None
+            }
+        })
+        .unwrap_or(default)
+}
+
 fn tier_label(source_notional: f64) -> &'static str {
     match source_notional {
         value if value < 10.0 => "<10U => 1U",
@@ -2087,6 +2406,21 @@ fn should_skip_small_buy(source_notional: f64, min_buy_source_notional_usd: f64)
 
 fn should_skip_dust_sell(source_notional: f64, min_sell_sync_notional_usd: f64) -> bool {
     min_sell_sync_notional_usd > 0.0 && source_notional < min_sell_sync_notional_usd
+}
+
+fn source_pressure_detected(stats: &SourceFlowStats, config: &AutoCopyConfig) -> bool {
+    if stats.sell_count < config.source_pressure_min_sell_count {
+        return false;
+    }
+    if stats.sell_notional_usd < config.source_pressure_min_sell_notional_usd {
+        return false;
+    }
+
+    stats
+        .avg_sell_gap_seconds()
+        .map_or(false, |avg_gap| {
+            avg_gap <= config.source_pressure_max_avg_sell_gap_seconds as f64
+        })
 }
 
 fn should_report_pending_sync(order: &PendingCopyOrder, execution: &ExecutionResult) -> bool {
@@ -2411,6 +2745,8 @@ mod tests {
         let state: AutoCopyState = serde_json::from_str(json).unwrap();
 
         assert!(state.failure_cooldowns.is_empty());
+        assert!(state.recent_source_flows.is_empty());
+        assert!(state.source_guards.is_empty());
     }
 
     #[test]
@@ -2419,10 +2755,169 @@ mod tests {
         assert_eq!(copy_action_label("SELL", ExecutionStatus::Failed), "失败");
     }
 
+    #[test]
+    fn first_sell_guards_only_the_same_outcome_buy() {
+        let mut engine = test_engine();
+        let employee = test_employee();
+
+        engine.handle_trade(
+            &employee,
+            &test_trade("SELL", "weather-market", "asset-32", 0.20, 2.0, 100),
+        );
+
+        let guarded = engine.handle_trade(
+            &employee,
+            &test_trade("BUY", "weather-market", "asset-32", 0.21, 5.0, 110),
+        );
+        assert!(guarded
+            .iter()
+            .any(|report| report.action == "SKIP:卖压冷却"));
+
+        let other_outcome = engine.handle_trade(
+            &employee,
+            &test_trade("BUY", "weather-market", "asset-33", 0.11, 5.0, 111),
+        );
+        assert!(other_outcome
+            .iter()
+            .any(|report| report.action == "BUY" && report.status == "dry-run"));
+    }
+
+    #[test]
+    fn rapid_sells_escalate_to_exact_outcome_pressure_guard() {
+        let mut engine = test_engine();
+        let employee = test_employee();
+
+        for (index, timestamp) in [100, 110, 120].into_iter().enumerate() {
+            engine.handle_trade(
+                &employee,
+                &test_trade(
+                    "SELL",
+                    "weather-market",
+                    "asset-32",
+                    0.20,
+                    1.20 + index as f64,
+                    timestamp,
+                ),
+            );
+        }
+
+        let guard = engine
+            .state
+            .active_source_guard("weather-market:asset-32", 121)
+            .unwrap();
+        assert_eq!(guard.kind, SourceGuardKind::Pressure);
+        assert!(engine
+            .state
+            .active_source_guard("weather-market:asset-33", 121)
+            .is_none());
+    }
+
+    #[test]
+    fn large_buy_during_guard_alerts_but_does_not_copy() {
+        let mut engine = test_engine();
+        let employee = test_employee();
+
+        engine.handle_trade(
+            &employee,
+            &test_trade("SELL", "weather-market", "asset-32", 0.20, 2.0, 100),
+        );
+        let reports = engine.handle_trade(
+            &employee,
+            &test_trade("BUY", "weather-market", "asset-32", 0.21, 35.0, 110),
+        );
+
+        assert!(reports
+            .iter()
+            .any(|report| report.action == "SKIP:可能重新建仓"));
+        assert!(!reports.iter().any(|report| report.action == "BUY"));
+    }
+
+    #[test]
+    fn source_pressure_requires_fast_sell_cadence() {
+        let config = test_config();
+        let slow_stats = SourceFlowStats {
+            sell_count: 3,
+            sell_notional_usd: 20.0,
+            first_sell_at_secs: Some(100),
+            last_sell_at_secs: Some(220),
+            ..SourceFlowStats::default()
+        };
+        let fast_stats = SourceFlowStats {
+            last_sell_at_secs: Some(140),
+            ..slow_stats.clone()
+        };
+
+        assert!(!source_pressure_detected(&slow_stats, &config));
+        assert!(source_pressure_detected(&fast_stats, &config));
+    }
+
     fn assert_near(left: f64, right: f64) {
         assert!(
             (left - right).abs() < 0.000_000_1,
             "expected {left} to be near {right}"
         );
+    }
+
+    fn test_engine() -> AutoCopyEngine {
+        AutoCopyEngine {
+            config: test_config(),
+            state: AutoCopyState::default(),
+        }
+    }
+
+    fn test_config() -> AutoCopyConfig {
+        let mut config = AutoCopyConfig::weatherhk_default();
+        config.enabled = true;
+        config.mode = AutoCopyMode::DryRun;
+        config.source_wallet = WEATHERHK_WALLET.to_owned();
+        config.domain = "WEATHER".to_owned();
+        config.min_buy_source_notional_usd = 1.0;
+        config.min_sell_sync_notional_usd = 1.0;
+        config.source_flow_window_seconds = 120;
+        config.post_sell_buy_guard_seconds = 120;
+        config.source_pressure_cooldown_seconds = 300;
+        config.source_pressure_min_sell_count = 3;
+        config.source_pressure_min_sell_notional_usd = 3.0;
+        config.source_pressure_max_avg_sell_gap_seconds = 30;
+        config.source_reentry_alert_buy_usd = 30.0;
+        config
+    }
+
+    fn test_employee() -> WatchedEmployee {
+        WatchedEmployee {
+            wallet: WEATHERHK_WALLET.to_owned(),
+            name: Some("WeatherHK".to_owned()),
+            domain: "WEATHER".to_owned(),
+            keywords: vec!["temperature".to_owned()],
+            poll_seconds: None,
+            min_notional_usd: None,
+        }
+    }
+
+    fn test_trade(
+        side: &str,
+        condition_id: &str,
+        asset: &str,
+        price: f64,
+        notional: f64,
+        timestamp: u64,
+    ) -> UserTrade {
+        UserTrade {
+            proxy_wallet: WEATHERHK_WALLET.to_owned(),
+            side: side.to_owned(),
+            asset: asset.to_owned(),
+            condition_id: condition_id.to_owned(),
+            size: Some(notional / price),
+            price: Some(price),
+            timestamp: Some(timestamp),
+            title: Some("Will the highest temperature in Hong Kong be 32°C on June 3?".to_owned()),
+            slug: Some("highest-temperature-in-hong-kong-on-june-3-2026".to_owned()),
+            event_slug: Some("highest-temperature-in-hong-kong-on-june-3-2026".to_owned()),
+            outcome: Some(asset.to_owned()),
+            outcome_index: None,
+            name: Some("WeatherHK".to_owned()),
+            pseudonym: Some("WeatherHK".to_owned()),
+            transaction_hash: Some(format!("0x{side}-{condition_id}-{asset}-{timestamp}")),
+        }
     }
 }

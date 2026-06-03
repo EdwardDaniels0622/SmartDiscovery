@@ -106,6 +106,23 @@
   - 新增 `WEATHERHK_FAILED_ACTION_COOLDOWN_SECONDS`，默认 `900` 秒；同一 action + market/outcome 在冷却期内不再重复执行失败动作。
   - 同类 failed 报告在冷却期内只发第一条，避免 Telegram 刷屏和 429 限流。
 
+### 9. 首笔 SELL 即时风控 + 同 outcome 短线卖压保护
+
+- 背景：WeatherHK 会在同一温度 outcome 上短时间大量 SELL，夹杂少量小额 BUY。这更像挂单卖出被吃、止盈出货或程序化库存调整；如果我方延迟跟 BUY，容易买在出货/掉价前。
+- 原则：
+  - 第一笔 SELL 不等待行为识别，立即按原逻辑取消同 `condition_id + asset` 的 pending BUY，并同步卖出/减仓已有仓位。
+  - 行为识别只绑定 exact outcome，即 `condition_id + asset`；`32°C Yes` 的卖压不影响 `33°C Yes` 的 BUY。
+  - 冷却内同 outcome 的小额 BUY 视为试探/库存回补/碎片成交，跳过。
+  - 冷却内明显大额 BUY 只发“可能重新建仓”提醒，初版不自动跟，等冷却结束后恢复正常评估。
+- 新增参数：
+  - `WEATHERHK_SOURCE_FLOW_WINDOW_SECONDS=120`：统计同 outcome 短窗口交易流。
+  - `WEATHERHK_POST_SELL_BUY_GUARD_SECONDS=120`：单笔 SELL 后同 outcome BUY 保护期。
+  - `WEATHERHK_SOURCE_PRESSURE_COOLDOWN_SECONDS=300`：短线卖压冷却时间。
+  - `WEATHERHK_SOURCE_PRESSURE_MIN_SELL_COUNT=3`：短窗口内至少 3 笔 SELL 才考虑卖压。
+  - `WEATHERHK_SOURCE_PRESSURE_MIN_SELL_NOTIONAL_USD=3`：短窗口 SELL 合计至少 3U。
+  - `WEATHERHK_SOURCE_PRESSURE_MAX_AVG_SELL_GAP_SECONDS=30`：SELL 平均间隔不超过 30 秒，识别为高频/程序化特征。
+  - `WEATHERHK_SOURCE_REENTRY_ALERT_BUY_USD=30`：冷却内 BUY 达到 30U 时按“可能重新建仓”提醒，但不自动跟。
+
 ## 运行与部署
 
 - LaunchAgent：`com.smartwallet.weatherhk.autocopy`
@@ -120,4 +137,4 @@
 - Telegram 429 后需要等待冷却，避免重复 pending 通知。
 - SELL 失败冷却只是止血；如果继续出现 `not enough balance / allowance`，需要核对实际 CLOB 持仓/allowance 与本地状态文件是否一致。
 - `/activity` 比 `/trades` 更实时，但仍需继续观察是否存在漏单。
-- 对天气阶梯市场，可以继续评估“同城市/同日期/同温度系列”联动撤单规则，但第一版先以同 asset 和源持仓对账为主。
+- 对天气阶梯市场，当前短线卖压保护严格限定 exact outcome；后续如要做同城市/同日期/相邻温度档联动，需要单独观察和设计，避免误伤机会。

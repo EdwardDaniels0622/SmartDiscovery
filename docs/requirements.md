@@ -308,6 +308,7 @@ MVP 优先接入 Polymarket 公开只读接口，并通过 `src/ports.rs` 中的
   - 高频交易
   - 同一市场反复买卖
   - 不是重仓信号
+- 但高频本身不是跳过理由，不代表所有高频都应跟。若同一个 exact outcome 出现首笔 SELL、短线连续 SELL、挂单被吃或止盈出货特征，应先按该 outcome 降风险，再决定后续 BUY 是否值得跟。
 - 我方跟单金额按 WeatherHK 实际成交金额分档：
   - `<10U` 跟 `1U`
   - `10-30U` 跟 `2U`
@@ -320,9 +321,11 @@ MVP 优先接入 Polymarket 公开只读接口，并通过 `src/ports.rs` 中的
   - 如果当前价格可接受，执行器应直接买入。
   - 如果当前价格超出追价上限，执行器应在接近 WeatherHK 成交价处挂被动限价买单。
   - WeatherHK 源成交金额低于 `1U` 时默认跳过，避免将碎片/试探成交放大成固定 `1U` 跟单。
+  - 如果同 `condition_id + asset` 刚出现 WeatherHK SELL，则短窗口内同 outcome BUY 默认跳过；大额 BUY 只提示“可能重新建仓”，初版不自动跟。
+  - 如果同 `condition_id + asset` 在短窗口内连续多笔 SELL，且金额、间隔符合挂单被吃/程序化出货特征，则该 exact outcome 进入短线卖压冷却；冷却只影响该 outcome，不影响相邻温度档位。
   - 挂单 TTL 可以配置；`0` 表示不按时间自动过期，只由 WeatherHK 卖出、源仓位对账或其他风险事件撤销。
 - SELL 处理：
-  - WeatherHK 卖出同 market/outcome 时，先取消我方相关未成交买入挂单。
+  - WeatherHK 卖出同 `condition_id + asset` 时，不等待行为识别，先取消我方相关未成交买入挂单。
   - 小额 SELL 仍然先取消相关未成交买入挂单；低于同步阈值时只是不卖出我方已成交仓位。
   - 如果我方已有对应仓位，按规则同步卖出一部分或清仓。
   - 如果没有对应仓位，只记录，不下单。
