@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.smartwallet.btc5m.follow.paper</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/will/Desktop/freedom/smart-wallet-discovery/scripts/btc_5m_follow.py</string>
+    <string>--config</string>
+    <string>/Users/will/Desktop/freedom/smart-wallet-discovery/config/btc_5m_follow.example.json</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/will/Desktop/freedom/smart-wallet-discovery</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/will/Desktop/freedom/smart-wallet-discovery/logs/btc_5m_follow_launchd.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/will/Desktop/freedom/smart-wallet-discovery/logs/btc_5m_follow_launchd.err</string>
+</dict>
+</plist>
