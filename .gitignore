@@ -3,6 +3,7 @@ target/
 __pycache__/
 **/__pycache__/
 logs/
+state/
 .DS_Store
 *.log
 *.err

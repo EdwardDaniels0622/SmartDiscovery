@@ -170,6 +170,7 @@ class State:
     last_decision_window_start: Optional[int] = None
     last_resolved_market_slug: str = ""
     last_resolved_result: str = UNKNOWN
+    last_previous_result_observed_market_slug: str = ""
     last_trade_market_slug: str = ""
     daily_pnl_usdc: float = 0.0
     daily_trade_count: int = 0
@@ -599,6 +600,36 @@ def first_present(payload: Any, *keys: str) -> Any:
     return None
 
 
+def trend_context(config: Config, candles: List[Candle], ret_30m: Optional[float]) -> Dict[str, Any]:
+    lookback = config.trend_lookback_bars
+    if len(candles) <= lookback:
+        return {
+            "binance_latest_candle_close_time": "",
+            "binance_latest_close": None,
+            "binance_lookback_candle_close_time": "",
+            "binance_lookback_close": None,
+            "trend_lookback_bars": lookback,
+            "trend_deadband_pct": config.trend_deadband_pct,
+            "ret_30m": round(ret_30m, 8) if ret_30m is not None else None,
+        }
+    latest = candles[-1]
+    base = candles[-1 - lookback]
+    return {
+        "binance_latest_candle_open_time": iso_utc(latest.open_time_ms // 1000),
+        "binance_latest_candle_close_time": iso_utc(latest.close_time_ms // 1000),
+        "binance_latest_open": latest.open,
+        "binance_latest_high": latest.high,
+        "binance_latest_low": latest.low,
+        "binance_latest_close": latest.close,
+        "binance_lookback_candle_open_time": iso_utc(base.open_time_ms // 1000),
+        "binance_lookback_candle_close_time": iso_utc(base.close_time_ms // 1000),
+        "binance_lookback_close": base.close,
+        "trend_lookback_bars": lookback,
+        "trend_deadband_pct": config.trend_deadband_pct,
+        "ret_30m": round(ret_30m, 8) if ret_30m is not None else None,
+    }
+
+
 def compute_trend(config: Config, state: State, candles: List[Candle]) -> Tuple[str, Optional[float]]:
     lookback = config.trend_lookback_bars
     if len(candles) <= lookback:
@@ -743,14 +774,16 @@ def build_decision(
     market: Optional[Market],
     previous_result: str,
     previous_market: Optional[Market],
-    best_ask: Optional[float],
-    ret_30m: Optional[float],
+    up_best_ask: Optional[float],
+    down_best_ask: Optional[float],
+    trend_data: Dict[str, Any],
     now_ts: int,
 ) -> Dict[str, Any]:
     selected_outcome = state.current_trend if state.current_trend in {UP, DOWN} else None
     action = "SKIP"
     reason = "SKIP_MARKET_NOT_FOUND"
     token_id = market.token_for(selected_outcome) if market and selected_outcome else None
+    best_ask = up_best_ask if selected_outcome == UP else down_best_ask if selected_outcome == DOWN else None
 
     if market is None:
         reason = "SKIP_MARKET_NOT_FOUND"
@@ -796,17 +829,29 @@ def build_decision(
         "market_end": market.end_iso if market else "",
         "market_start_ts": market.start_ts if market else None,
         "market_end_ts": market.end_ts if market else None,
+        "seconds_after_market_open": now_ts - market.start_ts if market else None,
+        "seconds_before_market_close": market.end_ts - now_ts if market else None,
+        "up_token_id": market.up_token_id if market else None,
+        "down_token_id": market.down_token_id if market else None,
         "previous_market_slug": previous_market.slug if previous_market else "",
+        "previous_market_start": previous_market.start_iso if previous_market else "",
         "previous_market_end": previous_market.end_iso if previous_market else "",
         "previous_result_available_at": iso_utc(now_ts) if previous_result in {UP, DOWN} else "",
+        "previous_result_latency_seconds": (
+            now_ts - previous_market.end_ts
+            if previous_market and previous_result in {UP, DOWN}
+            else None
+        ),
         "trend": state.current_trend,
         "previous_trend": state.previous_trend,
-        "ret_30m": round(ret_30m, 8) if ret_30m is not None else None,
+        **trend_data,
         "previous_result": previous_result,
         "action": action,
         "selected_outcome": selected_outcome,
         "token_id": token_id,
         "best_ask": best_ask,
+        "up_best_ask": up_best_ask,
+        "down_best_ask": down_best_ask,
         "fixed_amount_usdc": config.fixed_amount_usdc,
         "mode": config.mode,
         "enabled": config.enabled,
@@ -936,6 +981,35 @@ def append_jsonl(path: Path, payload: Dict[str, Any]) -> None:
         handle.write("\n")
 
 
+def log_previous_result_observed(
+    state: State,
+    log_path: Path,
+    current_market: Market,
+    previous_market: Optional[Market],
+    previous_result: str,
+    now_ts: int,
+) -> None:
+    if previous_market is None or previous_result not in {UP, DOWN}:
+        return
+    if state.last_previous_result_observed_market_slug == previous_market.slug:
+        return
+    state.last_previous_result_observed_market_slug = previous_market.slug
+    append_jsonl(
+        log_path,
+        {
+            "event_type": "previous_result_observed",
+            "timestamp": iso_utc(now_ts),
+            "current_market_slug": current_market.slug,
+            "current_market_start": current_market.start_iso,
+            "previous_market_slug": previous_market.slug,
+            "previous_market_start": previous_market.start_iso,
+            "previous_market_end": previous_market.end_iso,
+            "previous_result": previous_result,
+            "previous_result_latency_seconds": now_ts - previous_market.end_ts,
+        },
+    )
+
+
 def should_record_decision(state: State, market: Optional[Market], now_ts: int) -> bool:
     if market is not None:
         return state.last_decision_market_slug != market.slug
@@ -960,6 +1034,7 @@ def run_cycle(
 
     candles = binance.recent_5m_candles(now_ts)
     trend, ret_30m = compute_trend(config, state, candles)
+    trend_data = trend_context(config, candles, ret_30m)
     apply_trend(config, state, trend)
 
     log_path = config.log_file()
@@ -969,20 +1044,31 @@ def run_cycle(
     if market is not None:
         state.last_seen_market_slug = market.slug
 
+    previous_result = UNKNOWN
+    previous_market: Optional[Market] = None
+    if market is not None:
+        previous_result, previous_market = polymarket.previous_result(market)
+        log_previous_result_observed(
+            state,
+            log_path,
+            market,
+            previous_market,
+            previous_result,
+            now_ts,
+        )
+
     if market is not None and now_ts - market.start_ts < config.entry_delay_seconds:
         return None
     if not should_record_decision(state, market, now_ts):
         return None
 
-    previous_result = UNKNOWN
-    previous_market: Optional[Market] = None
-    best_ask: Optional[float] = None
+    up_best_ask: Optional[float] = None
+    down_best_ask: Optional[float] = None
     if market is not None:
-        previous_result, previous_market = polymarket.previous_result(market)
-        selected = state.current_trend if state.current_trend in {UP, DOWN} else None
-        token_id = market.token_for(selected) if selected else None
-        if token_id and previous_result == state.current_trend:
-            best_ask = polymarket.best_ask(token_id)
+        if market.up_token_id:
+            up_best_ask = polymarket.best_ask(market.up_token_id)
+        if market.down_token_id:
+            down_best_ask = polymarket.best_ask(market.down_token_id)
 
     decision = build_decision(
         config,
@@ -990,8 +1076,9 @@ def run_cycle(
         market,
         previous_result,
         previous_market,
-        best_ask,
-        ret_30m,
+        up_best_ask,
+        down_best_ask,
+        trend_data,
         now_ts,
     )
     decision = execute_decision(config, decision, now_ts)
