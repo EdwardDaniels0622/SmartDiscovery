@@ -1,0 +1,1079 @@
+#!/usr/bin/env python3
+"""Paper-first BTC 5m Polymarket UP/DOWN follower.
+
+The script uses Binance BTCUSDT 5m candles for trend, Gamma for BTC 5m
+market metadata/results, CLOB order books for best asks, and the existing
+Polymarket executor only when live trading is explicitly enabled.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CONFIG_PATH = ROOT / "config" / "btc_5m_follow.json"
+DEFAULT_STATE_PATH = ROOT / "state" / "btc_5m_follow_state.json"
+DEFAULT_LOG_PATH = ROOT / "logs" / "btc_5m_follow_decisions.jsonl"
+DEFAULT_EXECUTOR_PATH = ROOT / "scripts" / "polymarket_executor.sh"
+BTC_5M_SLUG_RE = re.compile(r"^btc-updown-5m-(\d+)$")
+UP = "UP"
+DOWN = "DOWN"
+NO_TREND = "NO_TREND"
+UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class Config:
+    enabled: bool = False
+    mode: str = "paper"
+    fixed_amount_usdc: float = 10.0
+    max_entry_price: float = 0.51
+    hard_max_entry_price: float = 0.52
+    trend_deadband_pct: float = 0.00075
+    trend_lookback_bars: int = 6
+    warmup_hours: float = 3.0
+    confirm_streak: int = 1
+    max_consecutive_losses: int = 2
+    entry_delay_seconds: int = 20
+    latest_entry_seconds_before_close: int = 90
+    trade_up: bool = False
+    trade_down: bool = True
+    max_trades_per_day: int = 80
+    max_daily_loss_usdc: float = 50.0
+    poll_seconds: int = 5
+    timezone: str = "Asia/Shanghai"
+    state_path: str = str(DEFAULT_STATE_PATH.relative_to(ROOT))
+    log_path: str = str(DEFAULT_LOG_PATH.relative_to(ROOT))
+    binance_base_url: str = "https://api.binance.com"
+    gamma_api_base: str = "https://gamma-api.polymarket.com"
+    clob_api_base: str = "https://clob.polymarket.com"
+    polymarket_proxy_url: Optional[str] = "http://127.0.0.1:7890"
+    binance_proxy_url: Optional[str] = "http://127.0.0.1:7890"
+    executor_path: str = str(DEFAULT_EXECUTOR_PATH.relative_to(ROOT))
+    http_timeout_seconds: int = 12
+    http_retries: int = 2
+    settlement_check_delay_seconds: int = 20
+
+    @classmethod
+    def load(cls, path: Optional[Path]) -> "Config":
+        config = cls()
+        if path is None:
+            path = DEFAULT_CONFIG_PATH if DEFAULT_CONFIG_PATH.exists() else None
+        if path is not None and path.exists():
+            payload = json.loads(path.read_text())
+            if not isinstance(payload, dict):
+                raise ValueError(f"config must be a JSON object: {path}")
+            known = set(cls.__dataclass_fields__.keys())
+            for key, value in payload.items():
+                if key in known:
+                    setattr(config, key, value)
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        self.mode = str(self.mode).lower()
+        if self.mode not in {"paper", "live"}:
+            raise ValueError("mode must be paper or live")
+        if self.fixed_amount_usdc <= 0:
+            raise ValueError("fixed_amount_usdc must be positive")
+        if not 0 < self.max_entry_price < 1:
+            raise ValueError("max_entry_price must be between 0 and 1")
+        if not 0 < self.hard_max_entry_price < 1:
+            raise ValueError("hard_max_entry_price must be between 0 and 1")
+        if self.max_entry_price > self.hard_max_entry_price:
+            raise ValueError("max_entry_price cannot exceed hard_max_entry_price")
+        self.trend_lookback_bars = max(1, int(self.trend_lookback_bars))
+        self.confirm_streak = max(1, int(self.confirm_streak))
+        self.max_consecutive_losses = max(1, int(self.max_consecutive_losses))
+        self.entry_delay_seconds = max(0, int(self.entry_delay_seconds))
+        self.latest_entry_seconds_before_close = max(0, int(self.latest_entry_seconds_before_close))
+        self.max_trades_per_day = max(0, int(self.max_trades_per_day))
+        self.poll_seconds = max(1, int(self.poll_seconds))
+        self.http_timeout_seconds = max(1, int(self.http_timeout_seconds))
+        self.http_retries = max(0, int(self.http_retries))
+
+    def state_file(self) -> Path:
+        return resolve_path(self.state_path)
+
+    def log_file(self) -> Path:
+        return resolve_path(self.log_path)
+
+    def executor_file(self) -> Path:
+        return resolve_path(self.executor_path)
+
+
+@dataclass
+class Candle:
+    open_time_ms: int
+    open: float
+    high: float
+    low: float
+    close: float
+    close_time_ms: int
+
+
+@dataclass
+class Market:
+    slug: str
+    start_ts: int
+    end_ts: int
+    up_token_id: Optional[str]
+    down_token_id: Optional[str]
+    raw: Dict[str, Any] = field(repr=False)
+
+    @property
+    def start_iso(self) -> str:
+        return iso_utc(self.start_ts)
+
+    @property
+    def end_iso(self) -> str:
+        return iso_utc(self.end_ts)
+
+    def token_for(self, outcome: str) -> Optional[str]:
+        if outcome == UP:
+            return self.up_token_id
+        if outcome == DOWN:
+            return self.down_token_id
+        return None
+
+
+@dataclass
+class State:
+    schema_version: int = 1
+    current_trend: str = NO_TREND
+    previous_trend: str = NO_TREND
+    pause_until_trend_turn: bool = False
+    consecutive_losses: int = 0
+    last_seen_market_slug: str = ""
+    last_decision_market_slug: str = ""
+    last_decision_window_start: Optional[int] = None
+    last_resolved_market_slug: str = ""
+    last_resolved_result: str = UNKNOWN
+    last_trade_market_slug: str = ""
+    daily_pnl_usdc: float = 0.0
+    daily_trade_count: int = 0
+    daily_date: str = ""
+    trend_candidate: str = NO_TREND
+    trend_candidate_streak: int = 0
+    open_trades: List[Dict[str, Any]] = field(default_factory=list)
+
+    @classmethod
+    def load(cls, path: Path) -> "State":
+        if not path.exists():
+            return cls()
+        payload = json.loads(path.read_text())
+        if not isinstance(payload, dict):
+            raise ValueError(f"state must be a JSON object: {path}")
+        state = cls()
+        for key in cls.__dataclass_fields__.keys():
+            if key in payload:
+                setattr(state, key, payload[key])
+        return state
+
+    def save(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = json.dumps(asdict(self), ensure_ascii=False, indent=2, sort_keys=True)
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=str(path.parent),
+            delete=False,
+        ) as handle:
+            handle.write(data)
+            handle.write("\n")
+            tmp_name = handle.name
+        os.replace(tmp_name, path)
+
+
+class JsonHttpClient:
+    def __init__(self, timeout_seconds: int, retries: int, proxy_url: Optional[str] = None):
+        self.timeout_seconds = timeout_seconds
+        self.retries = retries
+        self.proxy_url = normalize_proxy_url(proxy_url)
+
+    def get_json(self, url: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        if params:
+            query = urllib.parse.urlencode(
+                {key: value for key, value in params.items() if value is not None}
+            )
+            separator = "&" if "?" in url else "?"
+            url = f"{url}{separator}{query}"
+
+        opener = self._opener()
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "smart-wallet-discovery-btc-5m-follow/0.1",
+            },
+        )
+        last_error: Optional[BaseException] = None
+        for attempt in range(self.retries + 1):
+            try:
+                with opener.open(request, timeout=self.timeout_seconds) as response:
+                    body = response.read()
+                return json.loads(body)
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+                last_error = error
+                if attempt >= self.retries:
+                    break
+                time.sleep(0.5 * (2**attempt))
+        raise RuntimeError(f"GET {url} failed: {last_error}") from last_error
+
+    def _opener(self) -> urllib.request.OpenerDirector:
+        if not self.proxy_url:
+            return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        return urllib.request.build_opener(
+            urllib.request.ProxyHandler(
+                {
+                    "http": self.proxy_url,
+                    "https": self.proxy_url,
+                }
+            )
+        )
+
+
+class BinanceClient:
+    def __init__(self, config: Config):
+        self.config = config
+        proxy = (
+            config.binance_proxy_url
+            or os.environ.get("BINANCE_PROXY_URL")
+            or os.environ.get("HTTPS_PROXY")
+            or os.environ.get("HTTP_PROXY")
+        )
+        self.http = JsonHttpClient(
+            config.http_timeout_seconds,
+            config.http_retries,
+            proxy,
+        )
+
+    def recent_5m_candles(self, now_ts: int) -> List[Candle]:
+        bars_for_warmup = int(math.ceil(float(self.config.warmup_hours) * 60 / 5))
+        limit = max(bars_for_warmup + self.config.trend_lookback_bars + 3, 12)
+        limit = min(limit, 1000)
+        payload = self.http.get_json(
+            f"{self.config.binance_base_url.rstrip('/')}/api/v3/klines",
+            {
+                "symbol": "BTCUSDT",
+                "interval": "5m",
+                "limit": limit,
+            },
+        )
+        if not isinstance(payload, list):
+            raise RuntimeError("Binance klines response was not a list")
+
+        now_ms = now_ts * 1000
+        candles: List[Candle] = []
+        for row in payload:
+            if not isinstance(row, list) or len(row) < 7:
+                continue
+            candle = Candle(
+                open_time_ms=int(row[0]),
+                open=float(row[1]),
+                high=float(row[2]),
+                low=float(row[3]),
+                close=float(row[4]),
+                close_time_ms=int(row[6]),
+            )
+            if candle.close_time_ms <= now_ms:
+                candles.append(candle)
+        return candles
+
+
+class PolymarketClient:
+    def __init__(self, config: Config):
+        self.config = config
+        proxy = (
+            config.polymarket_proxy_url
+            or os.environ.get("POLYMARKET_PROXY_URL")
+            or os.environ.get("HTTPS_PROXY")
+            or os.environ.get("HTTP_PROXY")
+        )
+        self.http = JsonHttpClient(
+            config.http_timeout_seconds,
+            config.http_retries,
+            proxy,
+        )
+
+    def current_btc_5m_market(self, now_ts: int) -> Optional[Market]:
+        start_ts = floor_5m(now_ts)
+        direct = self.market_by_slug(slug_for_start(start_ts))
+        if direct is not None:
+            return direct
+        return self.scan_current_market(now_ts)
+
+    def market_by_slug(self, slug: str) -> Optional[Market]:
+        try:
+            payload = self.http.get_json(
+                f"{self.config.gamma_api_base.rstrip('/')}/markets",
+                {"slug": slug},
+            )
+        except RuntimeError:
+            payload = None
+
+        items: List[Any] = []
+        if isinstance(payload, list):
+            items = payload
+        elif isinstance(payload, dict):
+            items = payload.get("markets") or payload.get("data") or []
+        for item in items:
+            if isinstance(item, dict) and item.get("slug") == slug:
+                market = parse_market(item)
+                if market:
+                    return market
+
+        try:
+            event_payload = self.http.get_json(
+                f"{self.config.gamma_api_base.rstrip('/')}/events/slug/{urllib.parse.quote(slug)}"
+            )
+        except RuntimeError:
+            return None
+        return market_from_event_payload(event_payload, slug)
+
+    def scan_current_market(self, now_ts: int) -> Optional[Market]:
+        payload = self.http.get_json(
+            f"{self.config.gamma_api_base.rstrip('/')}/events",
+            {
+                "limit": 30,
+                "active": "true",
+                "closed": "false",
+                "order": "endDate",
+                "ascending": "true",
+                "tag_slug": "crypto",
+            },
+        )
+        events = payload if isinstance(payload, list) else payload.get("data", [])
+        candidates: List[Market] = []
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            if not is_btc_5m_event(event):
+                continue
+            market = market_from_event_payload(event, str(event.get("slug") or ""))
+            if market:
+                candidates.append(market)
+        candidates.sort(key=lambda item: item.start_ts)
+        for market in candidates:
+            if market.start_ts <= now_ts < market.end_ts:
+                return market
+        return None
+
+    def previous_result(self, current_market: Market) -> Tuple[str, Optional[Market]]:
+        previous = self.market_by_slug(slug_for_start(current_market.start_ts - 300))
+        if previous is None:
+            return UNKNOWN, None
+        return resolved_result(previous.raw), previous
+
+    def best_ask(self, token_id: str) -> Optional[float]:
+        try:
+            payload = self.http.get_json(
+                f"{self.config.clob_api_base.rstrip('/')}/book",
+                {"token_id": token_id},
+            )
+        except RuntimeError:
+            return None
+        if isinstance(payload, dict) and payload.get("error"):
+            return None
+        asks = payload.get("asks") if isinstance(payload, dict) else None
+        prices = []
+        if isinstance(asks, list):
+            for level in asks:
+                price = first_present(level, "price", "p")
+                try:
+                    prices.append(float(price))
+                except (TypeError, ValueError):
+                    continue
+        return min(prices) if prices else None
+
+
+def resolve_path(value: str) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else ROOT / path
+
+
+def normalize_proxy_url(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "off", "direct", "false", "0"}:
+        return None
+    return text
+
+
+def floor_5m(timestamp: int) -> int:
+    return timestamp - (timestamp % 300)
+
+
+def slug_for_start(start_ts: int) -> str:
+    return f"btc-updown-5m-{start_ts}"
+
+
+def iso_utc(timestamp: int) -> str:
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def parse_iso_timestamp(value: Any) -> Optional[int]:
+    if not value:
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp())
+
+
+def parse_jsonish_list(value: Any) -> List[Any]:
+    if isinstance(value, list):
+        return value
+    if value is None:
+        return []
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
+def parse_market(payload: Dict[str, Any]) -> Optional[Market]:
+    slug = str(payload.get("slug") or payload.get("market_slug") or "")
+    if not slug:
+        return None
+    slug_start = parse_slug_start(slug)
+    start_ts = slug_start or parse_iso_timestamp(
+        payload.get("eventStartTime")
+        or payload.get("startTime")
+        or payload.get("startDate")
+        or payload.get("game_start_time")
+    )
+    end_ts = parse_iso_timestamp(payload.get("endDate") or payload.get("end_date_iso"))
+    if start_ts is None:
+        return None
+    if end_ts is None or end_ts <= start_ts:
+        end_ts = start_ts + 300
+
+    outcomes = [normalize_outcome(value) for value in parse_jsonish_list(payload.get("outcomes"))]
+    token_ids = [str(value) for value in parse_jsonish_list(payload.get("clobTokenIds"))]
+
+    tokens = payload.get("tokens")
+    if isinstance(tokens, list) and tokens:
+        outcomes = [normalize_outcome(item.get("outcome")) for item in tokens if isinstance(item, dict)]
+        token_ids = [str(item.get("token_id") or item.get("tokenId") or "") for item in tokens if isinstance(item, dict)]
+
+    up_token_id = token_for_outcome(outcomes, token_ids, UP)
+    down_token_id = token_for_outcome(outcomes, token_ids, DOWN)
+    return Market(
+        slug=slug,
+        start_ts=start_ts,
+        end_ts=end_ts,
+        up_token_id=up_token_id,
+        down_token_id=down_token_id,
+        raw=payload,
+    )
+
+
+def market_from_event_payload(payload: Any, expected_slug: str) -> Optional[Market]:
+    if not isinstance(payload, dict):
+        return None
+    markets = payload.get("markets")
+    if isinstance(markets, list):
+        for item in markets:
+            if not isinstance(item, dict):
+                continue
+            if expected_slug and item.get("slug") != expected_slug:
+                continue
+            market = parse_market(item)
+            if market:
+                merged = dict(item)
+                if "eventStartTime" not in merged:
+                    merged["eventStartTime"] = payload.get("startTime")
+                market.raw = merged
+                return market
+    if expected_slug and payload.get("slug") != expected_slug:
+        return None
+    return parse_market(payload)
+
+
+def parse_slug_start(slug: str) -> Optional[int]:
+    match = BTC_5M_SLUG_RE.match(slug)
+    return int(match.group(1)) if match else None
+
+
+def normalize_outcome(value: Any) -> str:
+    text = str(value or "").strip().upper()
+    if text == "UP":
+        return UP
+    if text == "DOWN":
+        return DOWN
+    return text
+
+
+def token_for_outcome(outcomes: List[str], token_ids: List[str], outcome: str) -> Optional[str]:
+    for index, value in enumerate(outcomes):
+        if value == outcome and index < len(token_ids) and token_ids[index]:
+            return token_ids[index]
+    if outcome == UP and token_ids:
+        return token_ids[0]
+    if outcome == DOWN and len(token_ids) >= 2:
+        return token_ids[1]
+    return None
+
+
+def is_btc_5m_event(event: Dict[str, Any]) -> bool:
+    slug = str(event.get("slug") or "")
+    if BTC_5M_SLUG_RE.match(slug):
+        return True
+    if event.get("seriesSlug") == "btc-up-or-down-5m":
+        return True
+    title = str(event.get("title") or "")
+    return "Bitcoin Up or Down" in title and "5m" in str(event).lower()
+
+
+def resolved_result(market_payload: Dict[str, Any]) -> str:
+    tokens = market_payload.get("tokens")
+    if isinstance(tokens, list):
+        for token in tokens:
+            if not isinstance(token, dict) or not token.get("winner"):
+                continue
+            outcome = normalize_outcome(token.get("outcome"))
+            if outcome in {UP, DOWN}:
+                return outcome
+
+    outcomes = [normalize_outcome(value) for value in parse_jsonish_list(market_payload.get("outcomes"))]
+    prices = parse_jsonish_list(market_payload.get("outcomePrices"))
+    if len(outcomes) >= 2 and len(prices) >= 2:
+        parsed_prices = []
+        for price in prices:
+            try:
+                parsed_prices.append(float(price))
+            except (TypeError, ValueError):
+                parsed_prices.append(float("nan"))
+        if len(parsed_prices) >= len(outcomes):
+            best_index = max(range(len(outcomes)), key=lambda index: parsed_prices[index])
+            best_price = parsed_prices[best_index]
+            if best_price >= 0.999 or bool(market_payload.get("closed")):
+                outcome = outcomes[best_index]
+                if outcome in {UP, DOWN}:
+                    return outcome
+    return UNKNOWN
+
+
+def first_present(payload: Any, *keys: str) -> Any:
+    if isinstance(payload, dict):
+        for key in keys:
+            value = payload.get(key)
+            if value is not None:
+                return value
+    return None
+
+
+def compute_trend(config: Config, state: State, candles: List[Candle]) -> Tuple[str, Optional[float]]:
+    lookback = config.trend_lookback_bars
+    if len(candles) <= lookback:
+        return state.current_trend or NO_TREND, None
+
+    latest_close = candles[-1].close
+    base_close = candles[-1 - lookback].close
+    if base_close <= 0:
+        return state.current_trend or NO_TREND, None
+    ret_30m = latest_close / base_close - 1.0
+    raw_signal: Optional[str]
+    if ret_30m > config.trend_deadband_pct:
+        raw_signal = UP
+    elif ret_30m < -config.trend_deadband_pct:
+        raw_signal = DOWN
+    else:
+        raw_signal = None
+
+    if raw_signal is None:
+        return state.current_trend or NO_TREND, ret_30m
+
+    if raw_signal == state.current_trend:
+        state.trend_candidate = raw_signal
+        state.trend_candidate_streak = config.confirm_streak
+        return state.current_trend, ret_30m
+
+    if raw_signal == state.trend_candidate:
+        state.trend_candidate_streak += 1
+    else:
+        state.trend_candidate = raw_signal
+        state.trend_candidate_streak = 1
+
+    if state.trend_candidate_streak >= config.confirm_streak:
+        return raw_signal, ret_30m
+    return state.current_trend or NO_TREND, ret_30m
+
+
+def apply_trend(config: Config, state: State, new_trend: str) -> None:
+    old_trend = state.current_trend or NO_TREND
+    state.previous_trend = old_trend
+    state.current_trend = new_trend or NO_TREND
+    if old_trend in {UP, DOWN} and state.current_trend in {UP, DOWN} and old_trend != state.current_trend:
+        state.pause_until_trend_turn = False
+        state.consecutive_losses = 0
+        state.trend_candidate = state.current_trend
+        state.trend_candidate_streak = config.confirm_streak
+
+
+def local_date(config: Config, now_ts: int) -> str:
+    if ZoneInfo is None:
+        tz = timezone.utc
+    else:
+        try:
+            tz = ZoneInfo(config.timezone)
+        except Exception:
+            tz = timezone.utc
+    return datetime.fromtimestamp(now_ts, tz=tz).date().isoformat()
+
+
+def reset_daily_if_needed(config: Config, state: State, now_ts: int) -> None:
+    today = local_date(config, now_ts)
+    if state.daily_date != today:
+        state.daily_date = today
+        state.daily_pnl_usdc = 0.0
+        state.daily_trade_count = 0
+
+
+def settle_open_trades(
+    config: Config,
+    state: State,
+    polymarket: PolymarketClient,
+    log_path: Path,
+    now_ts: int,
+) -> None:
+    remaining: List[Dict[str, Any]] = []
+    for trade in state.open_trades:
+        try:
+            end_ts = int(trade.get("market_end_ts") or 0)
+        except (TypeError, ValueError):
+            end_ts = 0
+        if end_ts + config.settlement_check_delay_seconds > now_ts:
+            remaining.append(trade)
+            continue
+
+        slug = str(trade.get("market_slug") or "")
+        market = polymarket.market_by_slug(slug) if slug else None
+        result = resolved_result(market.raw) if market else UNKNOWN
+        if result not in {UP, DOWN}:
+            remaining.append(trade)
+            continue
+
+        selected = str(trade.get("selected_outcome") or "")
+        amount = float(trade.get("amount_usdc") or 0.0)
+        entry_price = float(trade.get("entry_price") or 0.0)
+        shares = float(trade.get("shares") or 0.0)
+        pnl = shares - amount if selected == result else -amount
+        state.daily_pnl_usdc += pnl
+        state.last_resolved_market_slug = slug
+        state.last_resolved_result = result
+        if pnl < 0:
+            state.consecutive_losses += 1
+        else:
+            state.consecutive_losses = 0
+        if state.consecutive_losses >= config.max_consecutive_losses:
+            state.pause_until_trend_turn = True
+
+        append_jsonl(
+            log_path,
+            {
+                "event_type": "settlement",
+                "timestamp": iso_utc(now_ts),
+                "market_slug": slug,
+                "market_start": trade.get("market_start"),
+                "market_end": trade.get("market_end"),
+                "trend": trade.get("trend"),
+                "ret_30m": trade.get("ret_30m"),
+                "previous_result": trade.get("previous_result"),
+                "action": "SETTLE",
+                "selected_outcome": selected,
+                "best_ask": entry_price,
+                "entry_price": entry_price,
+                "shares": shares,
+                "fixed_amount_usdc": amount,
+                "mode": trade.get("mode"),
+                "order_id": trade.get("order_id"),
+                "decision_reason": trade.get("decision_reason"),
+                "result": "WIN" if pnl > 0 else "LOSS",
+                "resolved_result": result,
+                "pnl_usdc": round(pnl, 8),
+                "consecutive_losses": state.consecutive_losses,
+                "daily_pnl_usdc": round(state.daily_pnl_usdc, 8),
+                "daily_trade_count": state.daily_trade_count,
+                "pause_until_trend_turn": state.pause_until_trend_turn,
+            },
+        )
+    state.open_trades = remaining
+
+
+def build_decision(
+    config: Config,
+    state: State,
+    market: Optional[Market],
+    previous_result: str,
+    previous_market: Optional[Market],
+    best_ask: Optional[float],
+    ret_30m: Optional[float],
+    now_ts: int,
+) -> Dict[str, Any]:
+    selected_outcome = state.current_trend if state.current_trend in {UP, DOWN} else None
+    action = "SKIP"
+    reason = "SKIP_MARKET_NOT_FOUND"
+    token_id = market.token_for(selected_outcome) if market and selected_outcome else None
+
+    if market is None:
+        reason = "SKIP_MARKET_NOT_FOUND"
+    elif now_ts - market.start_ts < config.entry_delay_seconds:
+        reason = "SKIP_ENTRY_DELAY"
+    elif market.end_ts - now_ts <= config.latest_entry_seconds_before_close:
+        reason = "SKIP_TOO_LATE_TO_ENTER"
+    elif state.current_trend not in {UP, DOWN}:
+        reason = "SKIP_NO_TREND"
+    elif state.daily_pnl_usdc <= -abs(config.max_daily_loss_usdc):
+        reason = "SKIP_DAILY_LOSS_LIMIT"
+    elif state.daily_trade_count >= config.max_trades_per_day:
+        reason = "SKIP_DAILY_TRADE_LIMIT"
+    elif state.pause_until_trend_turn:
+        reason = "SKIP_PAUSED_AFTER_LOSSES"
+    elif selected_outcome == UP and not config.trade_up:
+        reason = "SKIP_DIRECTION_DISABLED"
+    elif selected_outcome == DOWN and not config.trade_down:
+        reason = "SKIP_DIRECTION_DISABLED"
+    elif previous_result == UNKNOWN:
+        reason = "SKIP_PREVIOUS_RESULT_UNKNOWN"
+    elif previous_result != state.current_trend:
+        reason = "SKIP_PREVIOUS_RESULT_AGAINST_TREND"
+    elif token_id is None:
+        reason = "SKIP_MARKET_NOT_FOUND"
+    elif best_ask is None:
+        reason = "SKIP_PRICE_UNAVAILABLE"
+    elif best_ask > config.hard_max_entry_price:
+        reason = "SKIP_PRICE_TOO_HIGH"
+    elif best_ask > config.max_entry_price:
+        reason = "SKIP_PRICE_TOO_HIGH"
+    elif config.mode == "live" and not config.enabled:
+        reason = "SKIP_LIVE_DISABLED"
+    else:
+        action = "BUY_UP" if state.current_trend == UP else "BUY_DOWN"
+        reason = "ENTER_UP" if state.current_trend == UP else "ENTER_DOWN"
+
+    return {
+        "event_type": "decision",
+        "timestamp": iso_utc(now_ts),
+        "market_slug": market.slug if market else "",
+        "market_start": market.start_iso if market else "",
+        "market_end": market.end_iso if market else "",
+        "market_start_ts": market.start_ts if market else None,
+        "market_end_ts": market.end_ts if market else None,
+        "previous_market_slug": previous_market.slug if previous_market else "",
+        "previous_market_end": previous_market.end_iso if previous_market else "",
+        "previous_result_available_at": iso_utc(now_ts) if previous_result in {UP, DOWN} else "",
+        "trend": state.current_trend,
+        "previous_trend": state.previous_trend,
+        "ret_30m": round(ret_30m, 8) if ret_30m is not None else None,
+        "previous_result": previous_result,
+        "action": action,
+        "selected_outcome": selected_outcome,
+        "token_id": token_id,
+        "best_ask": best_ask,
+        "fixed_amount_usdc": config.fixed_amount_usdc,
+        "mode": config.mode,
+        "enabled": config.enabled,
+        "order_id": None,
+        "order_status": None,
+        "decision_reason": reason,
+        "result": "PENDING" if action.startswith("BUY_") else "",
+        "pnl_usdc": None,
+        "consecutive_losses": state.consecutive_losses,
+        "daily_pnl_usdc": round(state.daily_pnl_usdc, 8),
+        "daily_trade_count": state.daily_trade_count,
+        "pause_until_trend_turn": state.pause_until_trend_turn,
+    }
+
+
+def execute_decision(config: Config, decision: Dict[str, Any], now_ts: int) -> Dict[str, Any]:
+    action = str(decision.get("action") or "")
+    if not action.startswith("BUY_"):
+        return decision
+
+    best_ask = float(decision["best_ask"])
+    amount = float(decision["fixed_amount_usdc"])
+    shares = amount / best_ask
+    decision["entry_price"] = best_ask
+    decision["shares"] = shares
+
+    if config.mode == "paper":
+        decision["order_id"] = f"paper-{decision['market_slug']}-{decision['selected_outcome']}"
+        decision["order_status"] = "filled"
+        decision["execution_message"] = "paper fill at current best ask"
+        return decision
+
+    request = {
+        "schema_version": 1,
+        "mode": "live-external",
+        "action": "buy",
+        "source_name": "BTC5mFollow",
+        "source_trade": None,
+        "order": {
+            "asset": decision["token_id"],
+            "copy_amount_usd": amount,
+            "direct_limit_price": best_ask,
+            "passive_limit_price": best_ask,
+            "take_enabled": True,
+        },
+    }
+    executor = config.executor_file()
+    completed = subprocess.run(
+        [str(executor)],
+        input=json.dumps(request, separators=(",", ":")),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(ROOT),
+        check=False,
+    )
+    stdout = completed.stdout.strip()
+    try:
+        result = json.loads(stdout) if stdout else {}
+    except json.JSONDecodeError:
+        result = {"status": "failed", "message": stdout or completed.stderr.strip()}
+
+    decision["order_status"] = result.get("status") or "failed"
+    decision["order_id"] = result.get("order_id")
+    decision["executor_result"] = public_executor_result(result)
+    if result.get("filled_price"):
+        decision["entry_price"] = float(result["filled_price"])
+    elif result.get("order_price"):
+        decision["entry_price"] = float(result["order_price"])
+    if result.get("filled_size"):
+        decision["shares"] = float(result["filled_size"])
+    elif decision.get("entry_price"):
+        decision["shares"] = amount / float(decision["entry_price"])
+    if completed.returncode != 0 and decision["order_status"] != "failed":
+        decision["order_status"] = "failed"
+    return decision
+
+
+def public_executor_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    allowed = {
+        "status",
+        "order_id",
+        "order_price",
+        "filled_amount_usd",
+        "filled_size",
+        "filled_price",
+        "message",
+    }
+    return {key: value for key, value in result.items() if key in allowed}
+
+
+def remember_trade(config: Config, state: State, decision: Dict[str, Any]) -> None:
+    action = str(decision.get("action") or "")
+    status = str(decision.get("order_status") or "")
+    if not action.startswith("BUY_") or status in {"failed", "skipped", "cancelled"}:
+        return
+    market_slug = str(decision.get("market_slug") or "")
+    if not market_slug:
+        return
+    state.last_trade_market_slug = market_slug
+    state.daily_trade_count += 1
+    state.open_trades.append(
+        {
+            "market_slug": market_slug,
+            "market_start": decision.get("market_start"),
+            "market_end": decision.get("market_end"),
+            "market_start_ts": decision.get("market_start_ts"),
+            "market_end_ts": decision.get("market_end_ts"),
+            "selected_outcome": decision.get("selected_outcome"),
+            "amount_usdc": float(decision.get("fixed_amount_usdc") or config.fixed_amount_usdc),
+            "entry_price": float(decision.get("entry_price") or decision.get("best_ask") or 0.0),
+            "shares": float(decision.get("shares") or 0.0),
+            "mode": decision.get("mode"),
+            "order_id": decision.get("order_id"),
+            "decision_reason": decision.get("decision_reason"),
+            "trend": decision.get("trend"),
+            "ret_30m": decision.get("ret_30m"),
+            "previous_result": decision.get("previous_result"),
+        }
+    )
+
+
+def append_jsonl(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        handle.write("\n")
+
+
+def should_record_decision(state: State, market: Optional[Market], now_ts: int) -> bool:
+    if market is not None:
+        return state.last_decision_market_slug != market.slug
+    window_start = floor_5m(now_ts)
+    return state.last_decision_window_start != window_start
+
+
+def mark_decision_recorded(state: State, market: Optional[Market], now_ts: int) -> None:
+    state.last_decision_window_start = floor_5m(now_ts)
+    if market is not None:
+        state.last_decision_market_slug = market.slug
+
+
+def run_cycle(
+    config: Config,
+    state: State,
+    binance: BinanceClient,
+    polymarket: PolymarketClient,
+    now_ts: int,
+) -> Optional[Dict[str, Any]]:
+    reset_daily_if_needed(config, state, now_ts)
+
+    candles = binance.recent_5m_candles(now_ts)
+    trend, ret_30m = compute_trend(config, state, candles)
+    apply_trend(config, state, trend)
+
+    log_path = config.log_file()
+    settle_open_trades(config, state, polymarket, log_path, now_ts)
+
+    market = polymarket.current_btc_5m_market(now_ts)
+    if market is not None:
+        state.last_seen_market_slug = market.slug
+
+    if market is not None and now_ts - market.start_ts < config.entry_delay_seconds:
+        return None
+    if not should_record_decision(state, market, now_ts):
+        return None
+
+    previous_result = UNKNOWN
+    previous_market: Optional[Market] = None
+    best_ask: Optional[float] = None
+    if market is not None:
+        previous_result, previous_market = polymarket.previous_result(market)
+        selected = state.current_trend if state.current_trend in {UP, DOWN} else None
+        token_id = market.token_for(selected) if selected else None
+        if token_id and previous_result == state.current_trend:
+            best_ask = polymarket.best_ask(token_id)
+
+    decision = build_decision(
+        config,
+        state,
+        market,
+        previous_result,
+        previous_market,
+        best_ask,
+        ret_30m,
+        now_ts,
+    )
+    decision = execute_decision(config, decision, now_ts)
+    append_jsonl(log_path, decision)
+    remember_trade(config, state, decision)
+    mark_decision_recorded(state, market, now_ts)
+    return decision
+
+
+def write_default_config(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(asdict(Config()), indent=2, ensure_ascii=False) + "\n")
+
+
+def parse_now(value: Optional[str]) -> int:
+    if not value:
+        return int(time.time())
+    text = value.strip()
+    if text.isdigit():
+        return int(text)
+    parsed = parse_iso_timestamp(text)
+    if parsed is None:
+        raise ValueError(f"invalid --now value: {value}")
+    return parsed
+
+
+def print_decision(decision: Optional[Dict[str, Any]], now_ts: int) -> None:
+    if decision is None:
+        print(json.dumps({"timestamp": iso_utc(now_ts), "status": "waiting"}, ensure_ascii=False))
+    else:
+        print(json.dumps(decision, ensure_ascii=False, sort_keys=True))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=None)
+    parser.add_argument("--once", action="store_true", help="run one polling cycle")
+    parser.add_argument("--dry-run", action="store_true", help="force paper execution for this run")
+    parser.add_argument("--now", default=None, help="override current time as unix seconds or ISO timestamp")
+    parser.add_argument("--print-state", action="store_true")
+    parser.add_argument("--write-default-config", type=Path, default=None)
+    args = parser.parse_args()
+
+    if args.write_default_config:
+        write_default_config(args.write_default_config)
+        print(f"wrote {args.write_default_config}")
+        return 0
+
+    config = Config.load(args.config)
+    if args.dry_run:
+        config.mode = "paper"
+        config.enabled = False
+
+    state_path = config.state_file()
+    state = State.load(state_path)
+    if args.print_state:
+        print(json.dumps(asdict(state), ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+
+    binance = BinanceClient(config)
+    polymarket = PolymarketClient(config)
+
+    while True:
+        now_ts = parse_now(args.now)
+        try:
+            decision = run_cycle(config, state, binance, polymarket, now_ts)
+            state.save(state_path)
+            if args.once:
+                print_decision(decision, now_ts)
+                return 0
+        except KeyboardInterrupt:
+            state.save(state_path)
+            raise
+        except Exception as error:  # noqa: BLE001
+            state.save(state_path)
+            message = {"timestamp": iso_utc(int(time.time())), "status": "error", "error": str(error)}
+            print(json.dumps(message, ensure_ascii=False), file=sys.stderr)
+            if args.once:
+                return 1
+
+        time.sleep(config.poll_seconds)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
