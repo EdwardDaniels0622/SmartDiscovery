@@ -41,6 +41,10 @@ UP = "UP"
 DOWN = "DOWN"
 NO_TREND = "NO_TREND"
 UNKNOWN = "UNKNOWN"
+OFFICIAL_RESULT_SOURCE = "official_polymarket"
+COMPUTED_RESULT_SOURCE = "computed_price_to_beat"
+COMPUTED_RESULT_CHECK_INTERVAL_SECONDS = 60
+COMPUTED_RESULT_STATE_LIMIT = 500
 
 
 @dataclass
@@ -140,6 +144,7 @@ class Market:
     end_ts: int
     up_token_id: Optional[str]
     down_token_id: Optional[str]
+    price_to_beat: Optional[float]
     raw: Dict[str, Any] = field(repr=False)
 
     @property
@@ -178,6 +183,7 @@ class State:
     trend_candidate: str = NO_TREND
     trend_candidate_streak: int = 0
     open_trades: List[Dict[str, Any]] = field(default_factory=list)
+    computed_results: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> "State":
@@ -327,6 +333,16 @@ class PolymarketClient:
 
     def market_by_slug(self, slug: str) -> Optional[Market]:
         try:
+            event_payload = self.http.get_json(
+                f"{self.config.gamma_api_base.rstrip('/')}/events/slug/{urllib.parse.quote(slug)}"
+            )
+            market = market_from_event_payload(event_payload, slug)
+            if market:
+                return market
+        except RuntimeError:
+            pass
+
+        try:
             payload = self.http.get_json(
                 f"{self.config.gamma_api_base.rstrip('/')}/markets",
                 {"slug": slug},
@@ -344,14 +360,7 @@ class PolymarketClient:
                 market = parse_market(item)
                 if market:
                     return market
-
-        try:
-            event_payload = self.http.get_json(
-                f"{self.config.gamma_api_base.rstrip('/')}/events/slug/{urllib.parse.quote(slug)}"
-            )
-        except RuntimeError:
-            return None
-        return market_from_event_payload(event_payload, slug)
+        return None
 
     def scan_current_market(self, now_ts: int) -> Optional[Market]:
         payload = self.http.get_json(
@@ -468,6 +477,57 @@ def parse_jsonish_list(value: Any) -> List[Any]:
     return []
 
 
+def parse_jsonish_dict(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if value is None:
+        return {}
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def parse_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if math.isfinite(float(value)):
+            return float(value)
+        return None
+    if isinstance(value, str):
+        text = value.strip().replace("$", "").replace(",", "")
+        if not text:
+            return None
+        try:
+            parsed = float(text)
+        except ValueError:
+            return None
+        return parsed if math.isfinite(parsed) else None
+    return None
+
+
+def extract_price_to_beat(payload: Dict[str, Any]) -> Optional[float]:
+    metadata = parse_jsonish_dict(payload.get("eventMetadata") or payload.get("metadata"))
+    sources = [payload, metadata]
+    for source in sources:
+        for key in (
+            "priceToBeat",
+            "price_to_beat",
+            "targetPrice",
+            "target_price",
+            "openPrice",
+            "open_price",
+        ):
+            parsed = parse_float(source.get(key))
+            if parsed is not None:
+                return parsed
+    return None
+
+
 def parse_market(payload: Dict[str, Any]) -> Optional[Market]:
     slug = str(payload.get("slug") or payload.get("market_slug") or "")
     if not slug:
@@ -501,6 +561,7 @@ def parse_market(payload: Dict[str, Any]) -> Optional[Market]:
         end_ts=end_ts,
         up_token_id=up_token_id,
         down_token_id=down_token_id,
+        price_to_beat=extract_price_to_beat(payload),
         raw=payload,
     )
 
@@ -515,11 +576,13 @@ def market_from_event_payload(payload: Any, expected_slug: str) -> Optional[Mark
                 continue
             if expected_slug and item.get("slug") != expected_slug:
                 continue
-            market = parse_market(item)
+            merged = dict(item)
+            if "eventStartTime" not in merged:
+                merged["eventStartTime"] = payload.get("startTime")
+            if "eventMetadata" not in merged and payload.get("eventMetadata") is not None:
+                merged["eventMetadata"] = payload.get("eventMetadata")
+            market = parse_market(merged)
             if market:
-                merged = dict(item)
-                if "eventStartTime" not in merged:
-                    merged["eventStartTime"] = payload.get("startTime")
                 market.raw = merged
                 return market
     if expected_slug and payload.get("slug") != expected_slug:
@@ -756,6 +819,13 @@ def settle_open_trades(
                 "mode": trade.get("mode"),
                 "order_id": trade.get("order_id"),
                 "decision_reason": trade.get("decision_reason"),
+                "previous_result_source": trade.get("previous_result_source"),
+                "official_previous_result": trade.get("official_previous_result"),
+                "computed_previous_result": trade.get("computed_previous_result"),
+                "previous_price_to_beat": trade.get("previous_price_to_beat"),
+                "current_price_to_beat": trade.get("current_price_to_beat"),
+                "computed_price_delta": trade.get("computed_price_delta"),
+                "computed_result_latency_seconds": trade.get("computed_result_latency_seconds"),
                 "result": "WIN" if pnl > 0 else "LOSS",
                 "resolved_result": result,
                 "pnl_usdc": round(pnl, 8),
@@ -773,6 +843,9 @@ def build_decision(
     state: State,
     market: Optional[Market],
     previous_result: str,
+    previous_result_source: str,
+    official_previous_result: str,
+    computed_result: Dict[str, Any],
     previous_market: Optional[Market],
     up_best_ask: Optional[float],
     down_best_ask: Optional[float],
@@ -833,6 +906,7 @@ def build_decision(
         "seconds_before_market_close": market.end_ts - now_ts if market else None,
         "up_token_id": market.up_token_id if market else None,
         "down_token_id": market.down_token_id if market else None,
+        "current_price_to_beat": rounded_or_none(market.price_to_beat) if market else None,
         "previous_market_slug": previous_market.slug if previous_market else "",
         "previous_market_start": previous_market.start_iso if previous_market else "",
         "previous_market_end": previous_market.end_iso if previous_market else "",
@@ -842,6 +916,25 @@ def build_decision(
             if previous_market and previous_result in {UP, DOWN}
             else None
         ),
+        "previous_result_source": previous_result_source,
+        "official_previous_result": official_previous_result,
+        "official_previous_result_available_at": (
+            iso_utc(now_ts) if official_previous_result in {UP, DOWN} else ""
+        ),
+        "official_previous_result_latency_seconds": (
+            now_ts - previous_market.end_ts
+            if previous_market and official_previous_result in {UP, DOWN}
+            else None
+        ),
+        "computed_previous_result": computed_result.get("computed_previous_result", UNKNOWN),
+        "computed_result_source": computed_result.get("computed_result_source", COMPUTED_RESULT_SOURCE),
+        "computed_result_rule": computed_result.get("computed_result_rule"),
+        "computed_result_market_slug": computed_result.get("computed_result_market_slug", ""),
+        "computed_result_next_market_slug": computed_result.get("computed_result_next_market_slug", ""),
+        "previous_price_to_beat": computed_result.get("previous_price_to_beat"),
+        "computed_price_delta": computed_result.get("computed_price_delta"),
+        "computed_result_available_at": computed_result.get("computed_result_available_at", ""),
+        "computed_result_latency_seconds": computed_result.get("computed_result_latency_seconds"),
         "trend": state.current_trend,
         "previous_trend": state.previous_trend,
         **trend_data,
@@ -970,6 +1063,13 @@ def remember_trade(config: Config, state: State, decision: Dict[str, Any]) -> No
             "trend": decision.get("trend"),
             "ret_30m": decision.get("ret_30m"),
             "previous_result": decision.get("previous_result"),
+            "previous_result_source": decision.get("previous_result_source"),
+            "official_previous_result": decision.get("official_previous_result"),
+            "computed_previous_result": decision.get("computed_previous_result"),
+            "previous_price_to_beat": decision.get("previous_price_to_beat"),
+            "current_price_to_beat": decision.get("current_price_to_beat"),
+            "computed_price_delta": decision.get("computed_price_delta"),
+            "computed_result_latency_seconds": decision.get("computed_result_latency_seconds"),
         }
     )
 
@@ -1010,6 +1110,181 @@ def log_previous_result_observed(
     )
 
 
+def normalized_computed_results(state: State) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(state.computed_results, dict):
+        state.computed_results = {}
+    return state.computed_results
+
+
+def rounded_or_none(value: Optional[float], digits: int = 8) -> Optional[float]:
+    return round(float(value), digits) if value is not None else None
+
+
+def computed_previous_result_payload(
+    current_market: Market,
+    previous_market: Optional[Market],
+    now_ts: int,
+) -> Dict[str, Any]:
+    previous_price = previous_market.price_to_beat if previous_market else None
+    current_price = current_market.price_to_beat
+    payload: Dict[str, Any] = {
+        "computed_previous_result": UNKNOWN,
+        "computed_result_source": COMPUTED_RESULT_SOURCE,
+        "computed_result_rule": "current_price_to_beat - previous_price_to_beat",
+        "computed_result_market_slug": previous_market.slug if previous_market else "",
+        "computed_result_next_market_slug": current_market.slug,
+        "previous_price_to_beat": rounded_or_none(previous_price),
+        "current_price_to_beat": rounded_or_none(current_price),
+        "computed_price_delta": None,
+        "computed_result_available_at": "",
+        "computed_result_latency_seconds": None,
+    }
+    if previous_market is not None:
+        payload["computed_result_latency_seconds"] = now_ts - previous_market.end_ts
+    if previous_market is None or previous_price is None or current_price is None:
+        return payload
+
+    delta = current_price - previous_price
+    if delta > 0:
+        result = UP
+    elif delta < 0:
+        result = DOWN
+    else:
+        result = UNKNOWN
+    payload.update(
+        {
+            "computed_previous_result": result,
+            "computed_price_delta": rounded_or_none(delta),
+            "computed_result_available_at": iso_utc(now_ts) if result in {UP, DOWN} else "",
+        }
+    )
+    return payload
+
+
+def record_computed_previous_result(
+    state: State,
+    log_path: Path,
+    current_market: Market,
+    previous_market: Optional[Market],
+    now_ts: int,
+) -> Dict[str, Any]:
+    payload = computed_previous_result_payload(current_market, previous_market, now_ts)
+    result = str(payload.get("computed_previous_result") or UNKNOWN)
+    if previous_market is None or result not in {UP, DOWN}:
+        return payload
+
+    results = normalized_computed_results(state)
+    existing = results.get(previous_market.slug)
+    record = dict(existing) if isinstance(existing, dict) else {}
+    is_new = not record
+    record.update(
+        {
+            "market_slug": previous_market.slug,
+            "market_start": previous_market.start_iso,
+            "market_end": previous_market.end_iso,
+            "market_start_ts": previous_market.start_ts,
+            "market_end_ts": previous_market.end_ts,
+            "next_market_slug": current_market.slug,
+            "next_market_start": current_market.start_iso,
+            "next_market_start_ts": current_market.start_ts,
+            "previous_price_to_beat": payload.get("previous_price_to_beat"),
+            "current_price_to_beat": payload.get("current_price_to_beat"),
+            "computed_price_delta": payload.get("computed_price_delta"),
+            "computed_result": result,
+            "computed_result_source": COMPUTED_RESULT_SOURCE,
+            "computed_result_rule": payload.get("computed_result_rule"),
+            "computed_at": iso_utc(now_ts),
+            "computed_latency_seconds": payload.get("computed_result_latency_seconds"),
+        }
+    )
+    results[previous_market.slug] = record
+    prune_computed_results(state)
+
+    if is_new:
+        append_jsonl(
+            log_path,
+            {
+                "event_type": "computed_previous_result",
+                "timestamp": iso_utc(now_ts),
+                **record,
+            },
+        )
+    return payload
+
+
+def prune_computed_results(state: State) -> None:
+    results = normalized_computed_results(state)
+    if len(results) <= COMPUTED_RESULT_STATE_LIMIT:
+        return
+    ordered = sorted(
+        results.items(),
+        key=lambda item: int(item[1].get("market_start_ts") or 0)
+        if isinstance(item[1], dict)
+        else 0,
+    )
+    for slug, _record in ordered[: -COMPUTED_RESULT_STATE_LIMIT]:
+        results.pop(slug, None)
+
+
+def verify_computed_results(
+    config: Config,
+    state: State,
+    polymarket: PolymarketClient,
+    log_path: Path,
+    now_ts: int,
+) -> None:
+    results = normalized_computed_results(state)
+    checked = 0
+    ordered = sorted(
+        results.items(),
+        key=lambda item: int(item[1].get("market_start_ts") or 0)
+        if isinstance(item[1], dict)
+        else 0,
+    )
+    for slug, record in ordered:
+        if checked >= 5:
+            break
+        if not isinstance(record, dict):
+            continue
+        if record.get("official_result") in {UP, DOWN}:
+            continue
+        try:
+            end_ts = int(record.get("market_end_ts") or 0)
+            last_check_ts = int(record.get("last_official_check_ts") or 0)
+        except (TypeError, ValueError):
+            continue
+        if end_ts + config.settlement_check_delay_seconds > now_ts:
+            continue
+        if now_ts - last_check_ts < COMPUTED_RESULT_CHECK_INTERVAL_SECONDS:
+            continue
+
+        record["last_official_check_ts"] = now_ts
+        record["last_official_check_at"] = iso_utc(now_ts)
+        market = polymarket.market_by_slug(slug)
+        official_result = resolved_result(market.raw) if market else UNKNOWN
+        checked += 1
+        if official_result not in {UP, DOWN}:
+            continue
+
+        computed_result = str(record.get("computed_result") or UNKNOWN)
+        record.update(
+            {
+                "official_result": official_result,
+                "official_checked_at": iso_utc(now_ts),
+                "official_result_latency_seconds": now_ts - end_ts,
+                "match": computed_result == official_result,
+            }
+        )
+        append_jsonl(
+            log_path,
+            {
+                "event_type": "computed_result_verified",
+                "timestamp": iso_utc(now_ts),
+                **record,
+            },
+        )
+
+
 def should_record_decision(state: State, market: Optional[Market], now_ts: int) -> bool:
     if market is not None:
         return state.last_decision_market_slug != market.slug
@@ -1021,6 +1296,13 @@ def mark_decision_recorded(state: State, market: Optional[Market], now_ts: int) 
     state.last_decision_window_start = floor_5m(now_ts)
     if market is not None:
         state.last_decision_market_slug = market.slug
+
+
+def should_retry_decision_later(decision: Dict[str, Any]) -> bool:
+    return decision.get("decision_reason") in {
+        "SKIP_PREVIOUS_RESULT_UNKNOWN",
+        "SKIP_PRICE_UNAVAILABLE",
+    }
 
 
 def run_cycle(
@@ -1039,23 +1321,43 @@ def run_cycle(
 
     log_path = config.log_file()
     settle_open_trades(config, state, polymarket, log_path, now_ts)
+    verify_computed_results(config, state, polymarket, log_path, now_ts)
 
     market = polymarket.current_btc_5m_market(now_ts)
     if market is not None:
         state.last_seen_market_slug = market.slug
 
     previous_result = UNKNOWN
+    previous_result_source = ""
+    official_previous_result = UNKNOWN
+    computed_result: Dict[str, Any] = {}
     previous_market: Optional[Market] = None
     if market is not None:
-        previous_result, previous_market = polymarket.previous_result(market)
+        official_previous_result, previous_market = polymarket.previous_result(market)
         log_previous_result_observed(
             state,
             log_path,
             market,
             previous_market,
-            previous_result,
+            official_previous_result,
             now_ts,
         )
+        computed_result = record_computed_previous_result(
+            state,
+            log_path,
+            market,
+            previous_market,
+            now_ts,
+        )
+        computed_previous_result = str(
+            computed_result.get("computed_previous_result") or UNKNOWN
+        )
+        if official_previous_result in {UP, DOWN}:
+            previous_result = official_previous_result
+            previous_result_source = OFFICIAL_RESULT_SOURCE
+        elif computed_previous_result in {UP, DOWN}:
+            previous_result = computed_previous_result
+            previous_result_source = COMPUTED_RESULT_SOURCE
 
     if market is not None and now_ts - market.start_ts < config.entry_delay_seconds:
         return None
@@ -1075,6 +1377,9 @@ def run_cycle(
         state,
         market,
         previous_result,
+        previous_result_source,
+        official_previous_result,
+        computed_result,
         previous_market,
         up_best_ask,
         down_best_ask,
@@ -1084,7 +1389,8 @@ def run_cycle(
     decision = execute_decision(config, decision, now_ts)
     append_jsonl(log_path, decision)
     remember_trade(config, state, decision)
-    mark_decision_recorded(state, market, now_ts)
+    if not should_retry_decision_later(decision):
+        mark_decision_recorded(state, market, now_ts)
     return decision
 
 

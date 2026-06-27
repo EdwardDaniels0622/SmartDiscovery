@@ -14,7 +14,26 @@ Default behavior is paper mode. It will write state to `state/btc_5m_follow_stat
 
 The example config uses `http://127.0.0.1:7890` for both Binance and Polymarket. Set the proxy fields to `null` or `direct` if the machine can reach those APIs directly.
 
-Each market decision records the latest completed Binance 5m candle, the lookback candle used for the 30m return, UP/DOWN token ids, both UP and DOWN best asks, seconds after open, seconds before close, previous result, and observed previous-result latency. Separate `previous_result_observed` events are written the first time the script sees a completed previous market result.
+Each market decision records the latest completed Binance 5m candle, the lookback candle used for the 30m return, UP/DOWN token ids, both UP and DOWN best asks, seconds after open, seconds before close, previous result, result source, target prices, target-price delta, and observed previous-result latency. Separate `previous_result_observed` events are written the first time the script sees a completed previous market result.
+
+## Target-Price Result Mode
+
+Polymarket official settlement can arrive too late for a 20 second entry window, so the script now uses target prices as an early result signal:
+
+```text
+previous result = current market priceToBeat - previous market priceToBeat
+```
+
+If the delta is positive, the previous market is treated as `UP`; if negative, it is treated as `DOWN`. Official Polymarket results still take priority when available. When official settlement is not yet available, decisions use `previous_result_source=computed_price_to_beat` and log:
+
+- `previous_price_to_beat`
+- `current_price_to_beat`
+- `computed_price_delta`
+- `computed_previous_result`
+- `official_previous_result`
+- `previous_result_source`
+
+The script also stores computed results in state and periodically checks them against official settlement. Each completed check writes a `computed_result_verified` JSONL event with `match=true/false`, so target-price accuracy can be audited over time.
 
 ## Launchd Paper Deployment
 
