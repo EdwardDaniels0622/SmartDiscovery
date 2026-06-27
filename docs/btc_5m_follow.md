@@ -16,6 +16,28 @@ The example config uses `http://127.0.0.1:7890` for both Binance and Polymarket.
 
 Each market decision records the latest completed Binance 5m candle, the lookback candle used for the 30m return, UP/DOWN token ids, both UP and DOWN best asks, seconds after open, seconds before close, previous result, and observed previous-result latency. Separate `previous_result_observed` events are written the first time the script sees a completed previous market result.
 
+## Launchd Paper Deployment
+
+The LaunchAgent runs from:
+
+```text
+/Users/will/Library/Application Support/smart-wallet-discovery/start_btc_5m_follow_paper.sh
+```
+
+Paper state and decision data live under:
+
+```text
+/Users/will/Library/Application Support/smart-wallet-discovery/state/btc_5m_follow_state.json
+/Users/will/Library/Application Support/smart-wallet-discovery/logs/btc_5m_follow_decisions.jsonl
+```
+
+Launchd stdout/stderr live under:
+
+```text
+/Users/will/Library/Logs/smart-wallet-discovery/btc5m-follow-paper.log
+/Users/will/Library/Logs/smart-wallet-discovery/btc5m-follow-paper.err
+```
+
 ## Safety Defaults
 
 - `mode=paper`

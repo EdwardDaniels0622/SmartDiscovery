@@ -7,13 +7,12 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/will/Desktop/freedom/smart-wallet-discovery/scripts/btc_5m_follow.py</string>
-    <string>--config</string>
-    <string>/Users/will/Desktop/freedom/smart-wallet-discovery/config/btc_5m_follow.example.json</string>
+    <string>/bin/zsh</string>
+    <string>/Users/will/Library/Application Support/smart-wallet-discovery/start_btc_5m_follow_paper.sh</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/will/Desktop/freedom/smart-wallet-discovery</string>
+  <string>/Users/will/Library/Application Support/smart-wallet-discovery</string>
 
   <key>RunAtLoad</key>
   <true/>
@@ -22,9 +21,9 @@
   <true/>
 
   <key>StandardOutPath</key>
-  <string>/Users/will/Desktop/freedom/smart-wallet-discovery/logs/btc_5m_follow_launchd.log</string>
+  <string>/Users/will/Library/Logs/smart-wallet-discovery/btc5m-follow-paper.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/Users/will/Desktop/freedom/smart-wallet-discovery/logs/btc_5m_follow_launchd.err</string>
+  <string>/Users/will/Library/Logs/smart-wallet-discovery/btc5m-follow-paper.err</string>
 </dict>
 </plist>
