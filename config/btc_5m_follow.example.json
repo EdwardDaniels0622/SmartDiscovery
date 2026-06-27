@@ -22,6 +22,8 @@
   "binance_base_url": "https://api.binance.com",
   "gamma_api_base": "https://gamma-api.polymarket.com",
   "clob_api_base": "https://clob.polymarket.com",
+  "polymarket_web_base": "https://polymarket.com",
+  "polymarket_page_locale": "zh",
   "polymarket_proxy_url": "http://127.0.0.1:7890",
   "binance_proxy_url": "http://127.0.0.1:7890",
   "executor_path": "scripts/polymarket_executor.sh",

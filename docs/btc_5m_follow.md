@@ -18,20 +18,24 @@ Each market decision records the latest completed Binance 5m candle, the lookbac
 
 ## Target-Price Result Mode
 
-Polymarket official settlement can arrive too late for a 20 second entry window, so the script now uses target prices as an early result signal:
+Polymarket official settlement can arrive too late for a 20 second entry window, so the script now uses target and close prices as an early result signal. The primary metadata path is Gamma `eventMetadata`; when that is missing, the script fetches the Polymarket event page, parses `__NEXT_DATA__`, and reads the page's own `crypto-prices` / `past-results` data.
 
 ```text
-previous result = current market priceToBeat - previous market priceToBeat
+preferred previous result = previous final/close price - previous priceToBeat
+fallback previous result = current priceToBeat - previous priceToBeat
 ```
 
 If the delta is positive, the previous market is treated as `UP`; if negative, it is treated as `DOWN`. Official Polymarket results still take priority when available. When official settlement is not yet available, decisions use `previous_result_source=computed_price_to_beat` and log:
 
 - `previous_price_to_beat`
+- `previous_final_price`
 - `current_price_to_beat`
 - `computed_price_delta`
 - `computed_previous_result`
 - `official_previous_result`
 - `previous_result_source`
+- `current_page_price_source`
+- `previous_page_price_source`
 
 The script also stores computed results in state and periodically checks them against official settlement. Each completed check writes a `computed_result_verified` JSONL event with `match=true/false`, so target-price accuracy can be audited over time.
 

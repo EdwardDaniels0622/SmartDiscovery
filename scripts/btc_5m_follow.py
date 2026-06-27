@@ -9,6 +9,7 @@ Polymarket executor only when live trading is explicitly enabled.
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import math
 import os
@@ -72,6 +73,8 @@ class Config:
     binance_base_url: str = "https://api.binance.com"
     gamma_api_base: str = "https://gamma-api.polymarket.com"
     clob_api_base: str = "https://clob.polymarket.com"
+    polymarket_web_base: str = "https://polymarket.com"
+    polymarket_page_locale: str = "zh"
     polymarket_proxy_url: Optional[str] = "http://127.0.0.1:7890"
     binance_proxy_url: Optional[str] = "http://127.0.0.1:7890"
     executor_path: str = str(DEFAULT_EXECUTOR_PATH.relative_to(ROOT))
@@ -145,6 +148,7 @@ class Market:
     up_token_id: Optional[str]
     down_token_id: Optional[str]
     price_to_beat: Optional[float]
+    final_price: Optional[float]
     raw: Dict[str, Any] = field(repr=False)
 
     @property
@@ -248,6 +252,36 @@ class JsonHttpClient:
                 time.sleep(0.5 * (2**attempt))
         raise RuntimeError(f"GET {url} failed: {last_error}") from last_error
 
+    def get_text(self, url: str, params: Optional[Dict[str, Any]] = None) -> str:
+        if params:
+            query = urllib.parse.urlencode(
+                {key: value for key, value in params.items() if value is not None}
+            )
+            separator = "&" if "?" in url else "?"
+            url = f"{url}{separator}{query}"
+
+        opener = self._opener()
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "text/html,application/xhtml+xml,application/json",
+                "User-Agent": "Mozilla/5.0 (compatible; smart-wallet-discovery-btc-5m-follow/0.1)",
+            },
+        )
+        last_error: Optional[BaseException] = None
+        for attempt in range(self.retries + 1):
+            try:
+                with opener.open(request, timeout=self.timeout_seconds) as response:
+                    body = response.read()
+                    charset = response.headers.get_content_charset() or "utf-8"
+                return body.decode(charset, errors="replace")
+            except (urllib.error.URLError, TimeoutError, UnicodeDecodeError) as error:
+                last_error = error
+                if attempt >= self.retries:
+                    break
+                time.sleep(0.5 * (2**attempt))
+        raise RuntimeError(f"GET {url} failed: {last_error}") from last_error
+
     def _opener(self) -> urllib.request.OpenerDirector:
         if not self.proxy_url:
             return urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -323,6 +357,7 @@ class PolymarketClient:
             config.http_retries,
             proxy,
         )
+        self.page_price_cache: Dict[str, Dict[str, Any]] = {}
 
     def current_btc_5m_market(self, now_ts: int) -> Optional[Market]:
         start_ts = floor_5m(now_ts)
@@ -338,6 +373,7 @@ class PolymarketClient:
             )
             market = market_from_event_payload(event_payload, slug)
             if market:
+                self.enrich_market_from_page(market)
                 return market
         except RuntimeError:
             pass
@@ -359,8 +395,49 @@ class PolymarketClient:
             if isinstance(item, dict) and item.get("slug") == slug:
                 market = parse_market(item)
                 if market:
+                    self.enrich_market_from_page(market)
                     return market
         return None
+
+    def enrich_market_from_page(self, market: Market) -> None:
+        now_ts = int(time.time())
+        needs_open = market.price_to_beat is None
+        needs_final = market.end_ts <= now_ts and market.final_price is None
+        if not needs_open and not needs_final:
+            return
+
+        cached = self.page_price_cache.get(market.slug)
+        if cached:
+            fetched_at = int(cached.get("fetched_at") or 0)
+            has_open = cached.get("price_to_beat") is not None
+            has_final = cached.get("final_price") is not None
+            if now_ts - fetched_at < 15 and (has_open or not needs_open) and (has_final or not needs_final):
+                apply_market_page_price_data(market, cached)
+                return
+            if now_ts - fetched_at < 15 and not has_open and needs_open:
+                return
+
+        data = self.market_page_price_data(market)
+        data["fetched_at"] = now_ts
+        self.page_price_cache[market.slug] = data
+        apply_market_page_price_data(market, data)
+
+    def market_page_price_data(self, market: Market) -> Dict[str, Any]:
+        locale = str(self.config.polymarket_page_locale or "").strip("/")
+        base = self.config.polymarket_web_base.rstrip("/")
+        path = f"/{locale}/event/{market.slug}" if locale else f"/event/{market.slug}"
+        url = f"{base}{path}"
+        try:
+            html_text = self.http.get_text(url)
+        except RuntimeError:
+            return {}
+        payload = next_data_from_html(html_text)
+        if payload is None:
+            return {}
+        data = extract_market_price_data_from_next_data(payload, market)
+        if data:
+            data["page_url"] = url
+        return data
 
     def scan_current_market(self, now_ts: int) -> Optional[Market]:
         payload = self.http.get_json(
@@ -528,6 +605,24 @@ def extract_price_to_beat(payload: Dict[str, Any]) -> Optional[float]:
     return None
 
 
+def extract_final_price(payload: Dict[str, Any]) -> Optional[float]:
+    metadata = parse_jsonish_dict(payload.get("eventMetadata") or payload.get("metadata"))
+    sources = [payload, metadata]
+    for source in sources:
+        for key in (
+            "finalPrice",
+            "final_price",
+            "closePrice",
+            "close_price",
+            "settlementPrice",
+            "settlement_price",
+        ):
+            parsed = parse_float(source.get(key))
+            if parsed is not None:
+                return parsed
+    return None
+
+
 def parse_market(payload: Dict[str, Any]) -> Optional[Market]:
     slug = str(payload.get("slug") or payload.get("market_slug") or "")
     if not slug:
@@ -562,6 +657,7 @@ def parse_market(payload: Dict[str, Any]) -> Optional[Market]:
         up_token_id=up_token_id,
         down_token_id=down_token_id,
         price_to_beat=extract_price_to_beat(payload),
+        final_price=extract_final_price(payload),
         raw=payload,
     )
 
@@ -588,6 +684,125 @@ def market_from_event_payload(payload: Any, expected_slug: str) -> Optional[Mark
     if expected_slug and payload.get("slug") != expected_slug:
         return None
     return parse_market(payload)
+
+
+def next_data_from_html(html_text: str) -> Optional[Dict[str, Any]]:
+    match = re.search(
+        r"<script[^>]*id=[\"']__NEXT_DATA__[\"'][^>]*>(.*?)</script>",
+        html_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return None
+    text = html.unescape(match.group(1))
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def dehydrated_queries(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    queries = (
+        payload.get("props", {})
+        .get("pageProps", {})
+        .get("dehydratedState", {})
+        .get("queries", [])
+    )
+    return [query for query in queries if isinstance(query, dict)] if isinstance(queries, list) else []
+
+
+def market_time_matches(value: Any, expected_ts: int) -> bool:
+    parsed = parse_iso_timestamp(value)
+    return parsed == expected_ts if parsed is not None else False
+
+
+def result_from_price_delta(delta: Optional[float]) -> str:
+    if delta is None:
+        return UNKNOWN
+    if delta > 0:
+        return UP
+    if delta < 0:
+        return DOWN
+    return UNKNOWN
+
+
+def extract_market_price_data_from_next_data(
+    payload: Dict[str, Any],
+    market: Market,
+) -> Dict[str, Any]:
+    found: Dict[str, Any] = {}
+    for query in dehydrated_queries(payload):
+        state = query.get("state")
+        data = state.get("data") if isinstance(state, dict) else None
+        if not isinstance(data, dict):
+            continue
+
+        open_price = parse_float(data.get("openPrice"))
+        close_price = parse_float(data.get("closePrice"))
+        if open_price is not None:
+            key_text = json.dumps(
+                query.get("queryKey") or query.get("queryHash") or "",
+                ensure_ascii=False,
+            )
+            key_matches = market.start_iso in key_text or market.end_iso in key_text
+            if key_matches or not found.get("price_to_beat"):
+                found.update(
+                    {
+                        "price_to_beat": open_price,
+                        "final_price": close_price,
+                        "page_price_source": "polymarket_next_data_crypto_price",
+                    }
+                )
+
+        results = data.get("results")
+        if not isinstance(results, list):
+            nested = data.get("data")
+            if isinstance(nested, dict):
+                results = nested.get("results")
+        if not isinstance(results, list):
+            continue
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            if not market_time_matches(item.get("startTime"), market.start_ts):
+                continue
+            item_open = parse_float(item.get("openPrice"))
+            item_close = parse_float(item.get("closePrice"))
+            outcome = normalize_outcome(item.get("outcome"))
+            found.update(
+                {
+                    "price_to_beat": item_open if item_open is not None else found.get("price_to_beat"),
+                    "final_price": item_close if item_close is not None else found.get("final_price"),
+                    "page_result": outcome if outcome in {UP, DOWN} else UNKNOWN,
+                    "page_price_source": "polymarket_next_data_past_results",
+                }
+            )
+            return found
+    return found
+
+
+def apply_market_page_price_data(market: Market, data: Dict[str, Any]) -> None:
+    price_to_beat = parse_float(data.get("price_to_beat"))
+    final_price = parse_float(data.get("final_price"))
+    if market.price_to_beat is None and price_to_beat is not None:
+        market.price_to_beat = price_to_beat
+    if market.final_price is None and final_price is not None:
+        market.final_price = final_price
+    if data:
+        market.raw["pagePriceData"] = {
+            key: value
+            for key, value in data.items()
+            if key
+            in {
+                "price_to_beat",
+                "final_price",
+                "page_result",
+                "page_price_source",
+                "page_url",
+                "fetched_at",
+            }
+        }
 
 
 def parse_slug_start(slug: str) -> Optional[int]:
@@ -823,6 +1038,7 @@ def settle_open_trades(
                 "official_previous_result": trade.get("official_previous_result"),
                 "computed_previous_result": trade.get("computed_previous_result"),
                 "previous_price_to_beat": trade.get("previous_price_to_beat"),
+                "previous_final_price": trade.get("previous_final_price"),
                 "current_price_to_beat": trade.get("current_price_to_beat"),
                 "computed_price_delta": trade.get("computed_price_delta"),
                 "computed_result_latency_seconds": trade.get("computed_result_latency_seconds"),
@@ -932,9 +1148,20 @@ def build_decision(
         "computed_result_market_slug": computed_result.get("computed_result_market_slug", ""),
         "computed_result_next_market_slug": computed_result.get("computed_result_next_market_slug", ""),
         "previous_price_to_beat": computed_result.get("previous_price_to_beat"),
+        "previous_final_price": computed_result.get("previous_final_price"),
         "computed_price_delta": computed_result.get("computed_price_delta"),
         "computed_result_available_at": computed_result.get("computed_result_available_at", ""),
         "computed_result_latency_seconds": computed_result.get("computed_result_latency_seconds"),
+        "current_page_price_source": (
+            market.raw.get("pagePriceData", {}).get("page_price_source")
+            if market and isinstance(market.raw.get("pagePriceData"), dict)
+            else ""
+        ),
+        "previous_page_price_source": (
+            previous_market.raw.get("pagePriceData", {}).get("page_price_source")
+            if previous_market and isinstance(previous_market.raw.get("pagePriceData"), dict)
+            else ""
+        ),
         "trend": state.current_trend,
         "previous_trend": state.previous_trend,
         **trend_data,
@@ -1067,6 +1294,7 @@ def remember_trade(config: Config, state: State, decision: Dict[str, Any]) -> No
             "official_previous_result": decision.get("official_previous_result"),
             "computed_previous_result": decision.get("computed_previous_result"),
             "previous_price_to_beat": decision.get("previous_price_to_beat"),
+            "previous_final_price": decision.get("previous_final_price"),
             "current_price_to_beat": decision.get("current_price_to_beat"),
             "computed_price_delta": decision.get("computed_price_delta"),
             "computed_result_latency_seconds": decision.get("computed_result_latency_seconds"),
@@ -1126,14 +1354,16 @@ def computed_previous_result_payload(
     now_ts: int,
 ) -> Dict[str, Any]:
     previous_price = previous_market.price_to_beat if previous_market else None
+    previous_final = previous_market.final_price if previous_market else None
     current_price = current_market.price_to_beat
     payload: Dict[str, Any] = {
         "computed_previous_result": UNKNOWN,
         "computed_result_source": COMPUTED_RESULT_SOURCE,
-        "computed_result_rule": "current_price_to_beat - previous_price_to_beat",
+        "computed_result_rule": "",
         "computed_result_market_slug": previous_market.slug if previous_market else "",
         "computed_result_next_market_slug": current_market.slug,
         "previous_price_to_beat": rounded_or_none(previous_price),
+        "previous_final_price": rounded_or_none(previous_final),
         "current_price_to_beat": rounded_or_none(current_price),
         "computed_price_delta": None,
         "computed_result_available_at": "",
@@ -1141,19 +1371,22 @@ def computed_previous_result_payload(
     }
     if previous_market is not None:
         payload["computed_result_latency_seconds"] = now_ts - previous_market.end_ts
-    if previous_market is None or previous_price is None or current_price is None:
+    if previous_market is None or previous_price is None:
         return payload
 
-    delta = current_price - previous_price
-    if delta > 0:
-        result = UP
-    elif delta < 0:
-        result = DOWN
+    if previous_final is not None:
+        delta = previous_final - previous_price
+        rule = "previous_final_price - previous_price_to_beat"
+    elif current_price is not None:
+        delta = current_price - previous_price
+        rule = "current_price_to_beat - previous_price_to_beat"
     else:
-        result = UNKNOWN
+        return payload
+    result = result_from_price_delta(delta)
     payload.update(
         {
             "computed_previous_result": result,
+            "computed_result_rule": rule,
             "computed_price_delta": rounded_or_none(delta),
             "computed_result_available_at": iso_utc(now_ts) if result in {UP, DOWN} else "",
         }
@@ -1188,6 +1421,7 @@ def record_computed_previous_result(
             "next_market_start": current_market.start_iso,
             "next_market_start_ts": current_market.start_ts,
             "previous_price_to_beat": payload.get("previous_price_to_beat"),
+            "previous_final_price": payload.get("previous_final_price"),
             "current_price_to_beat": payload.get("current_price_to_beat"),
             "computed_price_delta": payload.get("computed_price_delta"),
             "computed_result": result,
