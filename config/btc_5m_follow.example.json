@@ -11,7 +11,7 @@
   "max_consecutive_losses": 2,
   "entry_delay_seconds": 20,
   "latest_entry_seconds_before_close": 90,
-  "trade_up": false,
+  "trade_up": true,
   "trade_down": true,
   "max_trades_per_day": 80,
   "max_daily_loss_usdc": 50,

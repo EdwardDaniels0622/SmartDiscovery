@@ -66,7 +66,7 @@ Launchd stdout/stderr live under:
 - `mode=paper`
 - `enabled=false`
 - `trade_down=true`
-- `trade_up=false`
+- `trade_up=true`
 - fixed stake only, no martingale
 - one decision per 5m market
 - no new entry inside the last 90 seconds
