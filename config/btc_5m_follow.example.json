@@ -9,7 +9,7 @@
   "warmup_hours": 3,
   "confirm_streak": 1,
   "max_consecutive_losses": 2,
-  "entry_delay_seconds": 20,
+  "entry_delay_seconds": 5,
   "latest_entry_seconds_before_close": 90,
   "trade_up": true,
   "trade_down": true,
@@ -29,5 +29,12 @@
   "executor_path": "scripts/polymarket_executor.sh",
   "http_timeout_seconds": 12,
   "http_retries": 2,
-  "settlement_check_delay_seconds": 20
+  "settlement_check_delay_seconds": 20,
+  "page_price_missing_retry_seconds": 2,
+  "shadow_strategies": [
+    "base_v1",
+    "delta_filter_v2",
+    "price60_v3",
+    "current_side_price60_v4"
+  ]
 }

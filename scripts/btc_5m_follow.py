@@ -46,6 +46,12 @@ OFFICIAL_RESULT_SOURCE = "official_polymarket"
 COMPUTED_RESULT_SOURCE = "computed_price_to_beat"
 COMPUTED_RESULT_CHECK_INTERVAL_SECONDS = 60
 COMPUTED_RESULT_STATE_LIMIT = 500
+DEFAULT_SHADOW_STRATEGIES = [
+    "base_v1",
+    "delta_filter_v2",
+    "price60_v3",
+    "current_side_price60_v4",
+]
 
 
 @dataclass
@@ -60,7 +66,7 @@ class Config:
     warmup_hours: float = 3.0
     confirm_streak: int = 1
     max_consecutive_losses: int = 2
-    entry_delay_seconds: int = 20
+    entry_delay_seconds: int = 5
     latest_entry_seconds_before_close: int = 90
     trade_up: bool = False
     trade_down: bool = True
@@ -81,6 +87,8 @@ class Config:
     http_timeout_seconds: int = 12
     http_retries: int = 2
     settlement_check_delay_seconds: int = 20
+    page_price_missing_retry_seconds: int = 2
+    shadow_strategies: List[str] = field(default_factory=lambda: list(DEFAULT_SHADOW_STRATEGIES))
 
     @classmethod
     def load(cls, path: Optional[Path]) -> "Config":
@@ -119,6 +127,23 @@ class Config:
         self.poll_seconds = max(1, int(self.poll_seconds))
         self.http_timeout_seconds = max(1, int(self.http_timeout_seconds))
         self.http_retries = max(0, int(self.http_retries))
+        self.page_price_missing_retry_seconds = max(
+            1,
+            int(self.page_price_missing_retry_seconds),
+        )
+        if isinstance(self.shadow_strategies, str):
+            self.shadow_strategies = [
+                item.strip()
+                for item in self.shadow_strategies.split(",")
+                if item.strip()
+            ]
+        elif not isinstance(self.shadow_strategies, list):
+            self.shadow_strategies = []
+        self.shadow_strategies = [
+            str(item).strip()
+            for item in self.shadow_strategies
+            if str(item).strip()
+        ]
 
     def state_file(self) -> Path:
         return resolve_path(self.state_path)
@@ -187,6 +212,7 @@ class State:
     trend_candidate: str = NO_TREND
     trend_candidate_streak: int = 0
     open_trades: List[Dict[str, Any]] = field(default_factory=list)
+    shadow_open_trades: List[Dict[str, Any]] = field(default_factory=list)
     computed_results: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
@@ -342,6 +368,18 @@ class BinanceClient:
                 candles.append(candle)
         return candles
 
+    def current_price(self) -> Optional[float]:
+        try:
+            payload = self.http.get_json(
+                f"{self.config.binance_base_url.rstrip('/')}/api/v3/ticker/price",
+                {"symbol": "BTCUSDT"},
+            )
+        except RuntimeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return parse_float(payload.get("price"))
+
 
 class PolymarketClient:
     def __init__(self, config: Config):
@@ -414,7 +452,11 @@ class PolymarketClient:
             if now_ts - fetched_at < 15 and (has_open or not needs_open) and (has_final or not needs_final):
                 apply_market_page_price_data(market, cached)
                 return
-            if now_ts - fetched_at < 15 and not has_open and needs_open:
+            if (
+                now_ts - fetched_at < self.config.page_price_missing_retry_seconds
+                and not has_open
+                and needs_open
+            ):
                 return
 
         data = self.market_page_price_data(market)
@@ -431,10 +473,7 @@ class PolymarketClient:
             html_text = self.http.get_text(url)
         except RuntimeError:
             return {}
-        payload = next_data_from_html(html_text)
-        if payload is None:
-            return {}
-        data = extract_market_price_data_from_next_data(payload, market)
+        data = extract_market_price_data_from_html(html_text, market)
         if data:
             data["page_url"] = url
         return data
@@ -712,6 +751,65 @@ def dehydrated_queries(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [query for query in queries if isinstance(query, dict)] if isinstance(queries, list) else []
 
 
+def app_router_flight_strings(html_text: str) -> List[str]:
+    strings: List[str] = []
+    for match in re.finditer(
+        r"self\.__next_f\.push\((\[.*?\])\)</script>",
+        html_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        try:
+            values = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(values, list):
+            continue
+        strings.extend(value for value in values if isinstance(value, str))
+    return strings
+
+
+def raw_json_value_after_key(text: str, key: str, start: int = 0) -> Tuple[Optional[Any], int]:
+    key_text = json.dumps(key)
+    key_index = text.find(key_text, start)
+    if key_index < 0:
+        return None, -1
+    colon_index = text.find(":", key_index + len(key_text))
+    if colon_index < 0:
+        return None, -1
+    value_start = colon_index + 1
+    while value_start < len(text) and text[value_start].isspace():
+        value_start += 1
+    try:
+        value, offset = json.JSONDecoder().raw_decode(text[value_start:])
+    except json.JSONDecodeError:
+        return None, key_index + len(key_text)
+    return value, value_start + offset
+
+
+def app_router_dehydrated_queries(html_text: str) -> List[Dict[str, Any]]:
+    queries: List[Dict[str, Any]] = []
+    for chunk in app_router_flight_strings(html_text):
+        search_from = 0
+        while True:
+            value, next_index = raw_json_value_after_key(chunk, "dehydratedState", search_from)
+            if next_index < 0:
+                break
+            search_from = next_index
+            if not isinstance(value, dict):
+                continue
+            chunk_queries = value.get("queries")
+            if isinstance(chunk_queries, list):
+                queries.extend(query for query in chunk_queries if isinstance(query, dict))
+    return queries
+
+
+def dehydrated_queries_from_html(html_text: str) -> List[Dict[str, Any]]:
+    payload = next_data_from_html(html_text)
+    queries: List[Dict[str, Any]] = dehydrated_queries(payload) if payload else []
+    queries.extend(app_router_dehydrated_queries(html_text))
+    return queries
+
+
 def market_time_matches(value: Any, expected_ts: int) -> bool:
     parsed = parse_iso_timestamp(value)
     return parsed == expected_ts if parsed is not None else False
@@ -727,12 +825,12 @@ def result_from_price_delta(delta: Optional[float]) -> str:
     return UNKNOWN
 
 
-def extract_market_price_data_from_next_data(
-    payload: Dict[str, Any],
+def extract_market_price_data_from_queries(
+    queries: List[Dict[str, Any]],
     market: Market,
 ) -> Dict[str, Any]:
     found: Dict[str, Any] = {}
-    for query in dehydrated_queries(payload):
+    for query in queries:
         state = query.get("state")
         data = state.get("data") if isinstance(state, dict) else None
         if not isinstance(data, dict):
@@ -780,6 +878,17 @@ def extract_market_price_data_from_next_data(
             )
             return found
     return found
+
+
+def extract_market_price_data_from_next_data(
+    payload: Dict[str, Any],
+    market: Market,
+) -> Dict[str, Any]:
+    return extract_market_price_data_from_queries(dehydrated_queries(payload), market)
+
+
+def extract_market_price_data_from_html(html_text: str, market: Market) -> Dict[str, Any]:
+    return extract_market_price_data_from_queries(dehydrated_queries_from_html(html_text), market)
 
 
 def apply_market_page_price_data(market: Market, data: Dict[str, Any]) -> None:
@@ -975,6 +1084,34 @@ def reset_daily_if_needed(config: Config, state: State, now_ts: int) -> None:
         state.daily_trade_count = 0
 
 
+def computed_result_record(state: State, slug: str) -> Optional[Dict[str, Any]]:
+    record = normalized_computed_results(state).get(slug)
+    return record if isinstance(record, dict) else None
+
+
+def computed_result_for_market(state: State, slug: str) -> Tuple[str, Optional[Dict[str, Any]]]:
+    record = computed_result_record(state, slug)
+    result = str(record.get("computed_result") or UNKNOWN) if record else UNKNOWN
+    if result in {UP, DOWN}:
+        return result, record
+    return UNKNOWN, record
+
+
+def resolve_market_for_settlement(
+    state: State,
+    polymarket: PolymarketClient,
+    slug: str,
+) -> Tuple[str, str, Optional[Dict[str, Any]]]:
+    computed_result, record = computed_result_for_market(state, slug)
+    if computed_result in {UP, DOWN}:
+        return computed_result, COMPUTED_RESULT_SOURCE, record
+    market = polymarket.market_by_slug(slug) if slug else None
+    official_result = resolved_result(market.raw) if market else UNKNOWN
+    if official_result in {UP, DOWN}:
+        return official_result, OFFICIAL_RESULT_SOURCE, record
+    return UNKNOWN, "", record
+
+
 def settle_open_trades(
     config: Config,
     state: State,
@@ -993,8 +1130,11 @@ def settle_open_trades(
             continue
 
         slug = str(trade.get("market_slug") or "")
-        market = polymarket.market_by_slug(slug) if slug else None
-        result = resolved_result(market.raw) if market else UNKNOWN
+        result, result_source, computed_record = resolve_market_for_settlement(
+            state,
+            polymarket,
+            slug,
+        )
         if result not in {UP, DOWN}:
             remaining.append(trade)
             continue
@@ -1042,6 +1182,8 @@ def settle_open_trades(
                 "current_price_to_beat": trade.get("current_price_to_beat"),
                 "computed_price_delta": trade.get("computed_price_delta"),
                 "computed_result_latency_seconds": trade.get("computed_result_latency_seconds"),
+                "settlement_result_source": result_source,
+                "settlement_computed_at": computed_record.get("computed_at") if computed_record else "",
                 "result": "WIN" if pnl > 0 else "LOSS",
                 "resolved_result": result,
                 "pnl_usdc": round(pnl, 8),
@@ -1052,6 +1194,74 @@ def settle_open_trades(
             },
         )
     state.open_trades = remaining
+
+
+def settle_shadow_open_trades(
+    config: Config,
+    state: State,
+    polymarket: PolymarketClient,
+    log_path: Path,
+    now_ts: int,
+) -> None:
+    remaining: List[Dict[str, Any]] = []
+    for trade in state.shadow_open_trades:
+        try:
+            end_ts = int(trade.get("market_end_ts") or 0)
+        except (TypeError, ValueError):
+            end_ts = 0
+        if end_ts + config.settlement_check_delay_seconds > now_ts:
+            remaining.append(trade)
+            continue
+
+        slug = str(trade.get("market_slug") or "")
+        result, result_source, computed_record = resolve_market_for_settlement(
+            state,
+            polymarket,
+            slug,
+        )
+        if result not in {UP, DOWN}:
+            remaining.append(trade)
+            continue
+
+        selected = str(trade.get("selected_outcome") or "")
+        amount = float(trade.get("amount_usdc") or 0.0)
+        entry_price = float(trade.get("entry_price") or 0.0)
+        shares = float(trade.get("shares") or 0.0)
+        pnl = shares - amount if selected == result else -amount
+        append_jsonl(
+            log_path,
+            {
+                "event_type": "shadow_settlement",
+                "timestamp": iso_utc(now_ts),
+                "strategy_name": trade.get("strategy_name"),
+                "market_slug": slug,
+                "market_start": trade.get("market_start"),
+                "market_end": trade.get("market_end"),
+                "trend": trade.get("trend"),
+                "ret_30m": trade.get("ret_30m"),
+                "previous_result": trade.get("previous_result"),
+                "selected_outcome": selected,
+                "entry_price": entry_price,
+                "shares": shares,
+                "fixed_amount_usdc": amount,
+                "previous_result_source": trade.get("previous_result_source"),
+                "computed_previous_result": trade.get("computed_previous_result"),
+                "previous_price_to_beat": trade.get("previous_price_to_beat"),
+                "previous_final_price": trade.get("previous_final_price"),
+                "current_price_to_beat": trade.get("current_price_to_beat"),
+                "computed_price_delta": trade.get("computed_price_delta"),
+                "computed_result_latency_seconds": trade.get("computed_result_latency_seconds"),
+                "binance_live_price": trade.get("binance_live_price"),
+                "current_price_delta_to_target": trade.get("current_price_delta_to_target"),
+                "current_price_side": trade.get("current_price_side"),
+                "settlement_result_source": result_source,
+                "settlement_computed_at": computed_record.get("computed_at") if computed_record else "",
+                "result": "WIN" if pnl > 0 else "LOSS",
+                "resolved_result": result,
+                "pnl_usdc": round(pnl, 8),
+            },
+        )
+    state.shadow_open_trades = remaining
 
 
 def build_decision(
@@ -1065,6 +1275,7 @@ def build_decision(
     previous_market: Optional[Market],
     up_best_ask: Optional[float],
     down_best_ask: Optional[float],
+    live_btc_price: Optional[float],
     trend_data: Dict[str, Any],
     now_ts: int,
 ) -> Dict[str, Any]:
@@ -1110,7 +1321,13 @@ def build_decision(
         action = "BUY_UP" if state.current_trend == UP else "BUY_DOWN"
         reason = "ENTER_UP" if state.current_trend == UP else "ENTER_DOWN"
 
-    return {
+    current_price_delta_to_target = (
+        live_btc_price - market.price_to_beat
+        if market and live_btc_price is not None and market.price_to_beat is not None
+        else None
+    )
+    current_price_side = result_from_price_delta(current_price_delta_to_target)
+    decision = {
         "event_type": "decision",
         "timestamp": iso_utc(now_ts),
         "market_slug": market.slug if market else "",
@@ -1152,6 +1369,9 @@ def build_decision(
         "computed_price_delta": computed_result.get("computed_price_delta"),
         "computed_result_available_at": computed_result.get("computed_result_available_at", ""),
         "computed_result_latency_seconds": computed_result.get("computed_result_latency_seconds"),
+        "binance_live_price": rounded_or_none(live_btc_price),
+        "current_price_delta_to_target": rounded_or_none(current_price_delta_to_target),
+        "current_price_side": current_price_side,
         "current_page_price_source": (
             market.raw.get("pagePriceData", {}).get("page_price_source")
             if market and isinstance(market.raw.get("pagePriceData"), dict)
@@ -1185,6 +1405,106 @@ def build_decision(
         "daily_trade_count": state.daily_trade_count,
         "pause_until_trend_turn": state.pause_until_trend_turn,
     }
+    decision["shadow_strategies"] = build_shadow_strategies(config, decision)
+    return decision
+
+
+def shadow_strategy_config(name: str) -> Dict[str, Any]:
+    configs = {
+        "base_v1": {
+            "max_entry_price": 0.51,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
+        },
+        "delta_filter_v2": {
+            "max_entry_price": 0.51,
+            "min_abs_computed_delta": 5.0,
+            "excluded_price_ranges": [(0.31, 0.40)],
+            "require_current_price_side": False,
+        },
+        "price60_v3": {
+            "max_entry_price": 0.60,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
+        },
+        "current_side_price60_v4": {
+            "max_entry_price": 0.60,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": True,
+        },
+    }
+    return configs.get(name, configs["base_v1"])
+
+
+def price_in_excluded_range(price: float, ranges: List[Tuple[float, float]]) -> bool:
+    return any(low <= price <= high for low, high in ranges)
+
+
+def build_shadow_strategies(config: Config, decision: Dict[str, Any]) -> List[Dict[str, Any]]:
+    shadows: List[Dict[str, Any]] = []
+    for name in config.shadow_strategies:
+        strategy = shadow_strategy_config(name)
+        action = "SHADOW_SKIP"
+        reason = "SHADOW_SKIP_MARKET_NOT_FOUND"
+        selected_outcome = str(decision.get("selected_outcome") or "")
+        best_ask = parse_float(decision.get("best_ask"))
+        computed_delta = parse_float(decision.get("computed_price_delta"))
+
+        if not decision.get("market_slug"):
+            reason = "SHADOW_SKIP_MARKET_NOT_FOUND"
+        elif int(decision.get("seconds_after_market_open") or 0) < config.entry_delay_seconds:
+            reason = "SHADOW_SKIP_ENTRY_DELAY"
+        elif int(decision.get("seconds_before_market_close") or 0) <= config.latest_entry_seconds_before_close:
+            reason = "SHADOW_SKIP_TOO_LATE_TO_ENTER"
+        elif decision.get("trend") not in {UP, DOWN}:
+            reason = "SHADOW_SKIP_NO_TREND"
+        elif selected_outcome not in {UP, DOWN}:
+            reason = "SHADOW_SKIP_NO_OUTCOME"
+        elif decision.get("previous_result") == UNKNOWN:
+            reason = "SHADOW_SKIP_PREVIOUS_RESULT_UNKNOWN"
+        elif decision.get("previous_result") != decision.get("trend"):
+            reason = "SHADOW_SKIP_PREVIOUS_RESULT_AGAINST_TREND"
+        elif not decision.get("token_id"):
+            reason = "SHADOW_SKIP_MARKET_NOT_FOUND"
+        elif best_ask is None:
+            reason = "SHADOW_SKIP_PRICE_UNAVAILABLE"
+        elif best_ask > float(strategy["max_entry_price"]):
+            reason = "SHADOW_SKIP_PRICE_TOO_HIGH"
+        elif price_in_excluded_range(best_ask, strategy["excluded_price_ranges"]):
+            reason = "SHADOW_SKIP_PRICE_RANGE_FILTER"
+        elif (
+            strategy["min_abs_computed_delta"] is not None
+            and (computed_delta is None or abs(computed_delta) < float(strategy["min_abs_computed_delta"]))
+        ):
+            reason = "SHADOW_SKIP_TINY_TARGET_DELTA"
+        elif strategy["require_current_price_side"] and decision.get("current_price_side") != selected_outcome:
+            reason = "SHADOW_SKIP_CURRENT_PRICE_AGAINST_OR_UNKNOWN"
+        else:
+            action = "SHADOW_BUY_UP" if selected_outcome == UP else "SHADOW_BUY_DOWN"
+            reason = "SHADOW_ENTER_UP" if selected_outcome == UP else "SHADOW_ENTER_DOWN"
+
+        shadow = {
+            "strategy_name": name,
+            "action": action,
+            "decision_reason": reason,
+            "selected_outcome": selected_outcome,
+            "best_ask": best_ask,
+            "entry_price": best_ask if action.startswith("SHADOW_BUY_") else None,
+            "shares": (
+                float(config.fixed_amount_usdc) / best_ask
+                if action.startswith("SHADOW_BUY_") and best_ask
+                else None
+            ),
+            "fixed_amount_usdc": config.fixed_amount_usdc,
+            "max_entry_price": strategy["max_entry_price"],
+            "min_abs_computed_delta": strategy["min_abs_computed_delta"],
+            "require_current_price_side": strategy["require_current_price_side"],
+        }
+        shadows.append(shadow)
+    return shadows
 
 
 def execute_decision(config: Config, decision: Dict[str, Any], now_ts: int) -> Dict[str, Any]:
@@ -1300,6 +1620,58 @@ def remember_trade(config: Config, state: State, decision: Dict[str, Any]) -> No
             "computed_result_latency_seconds": decision.get("computed_result_latency_seconds"),
         }
     )
+
+
+def remember_shadow_trades(config: Config, state: State, decision: Dict[str, Any]) -> None:
+    market_slug = str(decision.get("market_slug") or "")
+    if not market_slug:
+        return
+    existing = {
+        (str(item.get("market_slug") or ""), str(item.get("strategy_name") or ""))
+        for item in state.shadow_open_trades
+    }
+    for shadow in decision.get("shadow_strategies") or []:
+        if not isinstance(shadow, dict):
+            continue
+        action = str(shadow.get("action") or "")
+        strategy_name = str(shadow.get("strategy_name") or "")
+        if not action.startswith("SHADOW_BUY_") or not strategy_name:
+            continue
+        key = (market_slug, strategy_name)
+        if key in existing:
+            continue
+        best_ask = parse_float(shadow.get("entry_price") or shadow.get("best_ask"))
+        if best_ask is None or best_ask <= 0:
+            continue
+        existing.add(key)
+        state.shadow_open_trades.append(
+            {
+                "strategy_name": strategy_name,
+                "market_slug": market_slug,
+                "market_start": decision.get("market_start"),
+                "market_end": decision.get("market_end"),
+                "market_start_ts": decision.get("market_start_ts"),
+                "market_end_ts": decision.get("market_end_ts"),
+                "selected_outcome": shadow.get("selected_outcome"),
+                "amount_usdc": float(shadow.get("fixed_amount_usdc") or config.fixed_amount_usdc),
+                "entry_price": best_ask,
+                "shares": float(shadow.get("shares") or 0.0),
+                "decision_reason": shadow.get("decision_reason"),
+                "trend": decision.get("trend"),
+                "ret_30m": decision.get("ret_30m"),
+                "previous_result": decision.get("previous_result"),
+                "previous_result_source": decision.get("previous_result_source"),
+                "computed_previous_result": decision.get("computed_previous_result"),
+                "previous_price_to_beat": decision.get("previous_price_to_beat"),
+                "previous_final_price": decision.get("previous_final_price"),
+                "current_price_to_beat": decision.get("current_price_to_beat"),
+                "computed_price_delta": decision.get("computed_price_delta"),
+                "computed_result_latency_seconds": decision.get("computed_result_latency_seconds"),
+                "binance_live_price": decision.get("binance_live_price"),
+                "current_price_delta_to_target": decision.get("current_price_delta_to_target"),
+                "current_price_side": decision.get("current_price_side"),
+            }
+        )
 
 
 def append_jsonl(path: Path, payload: Dict[str, Any]) -> None:
@@ -1554,8 +1926,6 @@ def run_cycle(
     apply_trend(config, state, trend)
 
     log_path = config.log_file()
-    settle_open_trades(config, state, polymarket, log_path, now_ts)
-    verify_computed_results(config, state, polymarket, log_path, now_ts)
 
     market = polymarket.current_btc_5m_market(now_ts)
     if market is not None:
@@ -1593,6 +1963,10 @@ def run_cycle(
             previous_result = computed_previous_result
             previous_result_source = COMPUTED_RESULT_SOURCE
 
+    settle_open_trades(config, state, polymarket, log_path, now_ts)
+    settle_shadow_open_trades(config, state, polymarket, log_path, now_ts)
+    verify_computed_results(config, state, polymarket, log_path, now_ts)
+
     if market is not None and now_ts - market.start_ts < config.entry_delay_seconds:
         return None
     if not should_record_decision(state, market, now_ts):
@@ -1606,6 +1980,7 @@ def run_cycle(
         if market.down_token_id:
             down_best_ask = polymarket.best_ask(market.down_token_id)
 
+    live_btc_price = binance.current_price()
     decision = build_decision(
         config,
         state,
@@ -1617,12 +1992,14 @@ def run_cycle(
         previous_market,
         up_best_ask,
         down_best_ask,
+        live_btc_price,
         trend_data,
         now_ts,
     )
     decision = execute_decision(config, decision, now_ts)
     append_jsonl(log_path, decision)
     remember_trade(config, state, decision)
+    remember_shadow_trades(config, state, decision)
     if not should_retry_decision_later(decision):
         mark_decision_recorded(state, market, now_ts)
     return decision

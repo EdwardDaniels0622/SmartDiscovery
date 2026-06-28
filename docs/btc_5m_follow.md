@@ -14,11 +14,11 @@ Default behavior is paper mode. It will write state to `state/btc_5m_follow_stat
 
 The example config uses `http://127.0.0.1:7890` for both Binance and Polymarket. Set the proxy fields to `null` or `direct` if the machine can reach those APIs directly.
 
-Each market decision records the latest completed Binance 5m candle, the lookback candle used for the 30m return, UP/DOWN token ids, both UP and DOWN best asks, seconds after open, seconds before close, previous result, result source, target prices, target-price delta, and observed previous-result latency. Separate `previous_result_observed` events are written the first time the script sees a completed previous market result.
+Each market decision records the latest completed Binance 5m candle, the lookback candle used for the 30m return, live Binance BTC price, UP/DOWN token ids, both UP and DOWN best asks, seconds after open, seconds before close, previous result, result source, target prices, target-price delta, and observed previous-result latency. Separate `previous_result_observed` events are written the first time the script sees a completed previous market result.
 
 ## Target-Price Result Mode
 
-Polymarket official settlement can arrive too late for a 20 second entry window, so the script now uses target and close prices as an early result signal. The primary metadata path is Gamma `eventMetadata`; when that is missing, the script fetches the Polymarket event page, parses `__NEXT_DATA__`, and reads the page's own `crypto-prices` / `past-results` data.
+Polymarket official settlement can arrive too late for a 5m market, so the script now uses target and close prices as an early result signal. The primary metadata path is Gamma `eventMetadata`; when that is missing, the script fetches the Polymarket event page and reads the page's own `crypto-prices` / `past-results` data from either legacy `__NEXT_DATA__` or current Next App Router flight data.
 
 ```text
 preferred previous result = previous final/close price - previous priceToBeat
@@ -36,8 +36,20 @@ If the delta is positive, the previous market is treated as `UP`; if negative, i
 - `previous_result_source`
 - `current_page_price_source`
 - `previous_page_price_source`
+- `binance_live_price`
+- `current_price_delta_to_target`
+- `current_price_side`
 
-The script also stores computed results in state and periodically checks them against official settlement. Each completed check writes a `computed_result_verified` JSONL event with `match=true/false`, so target-price accuracy can be audited over time.
+The script also stores computed results in state and periodically checks them against official settlement. Each completed check writes a `computed_result_verified` JSONL event with `match=true/false`, so target-price accuracy can be audited over time. Paper settlement now prefers computed target-price results and later verifies them against official settlement.
+
+## Shadow Strategies
+
+Decisions include a `shadow_strategies` array, and simulated entries are settled with `shadow_settlement` JSONL events. These strategies do not call the live executor and do not affect the main paper account. Current built-ins are:
+
+- `base_v1`: trend plus previous same-direction result, max price `0.51`
+- `delta_filter_v2`: `base_v1`, skip target-price deltas below `$5`, skip entry prices `0.31` through `0.40`
+- `price60_v3`: trend plus previous same-direction result, max price `0.60`
+- `current_side_price60_v4`: `price60_v3`, additionally require live BTC price to be on the selected side of the target price
 
 ## Launchd Paper Deployment
 
@@ -70,6 +82,7 @@ Launchd stdout/stderr live under:
 - `trade_up=true`
 - fixed stake only, no martingale
 - one decision per 5m market
+- no entry before 5 seconds after market open
 - no new entry inside the last 90 seconds
 - skip entries above `max_entry_price`, with `hard_max_entry_price` as an absolute guard
 - pause after two consecutive losses until the Binance 30m trend turns
