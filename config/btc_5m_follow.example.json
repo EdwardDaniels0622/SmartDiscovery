@@ -1,7 +1,7 @@
 {
   "enabled": false,
   "mode": "paper",
-  "fixed_amount_usdc": 10,
+  "fixed_amount_usdc": 1,
   "max_entry_price": 0.51,
   "hard_max_entry_price": 0.52,
   "trend_deadband_pct": 0.00075,

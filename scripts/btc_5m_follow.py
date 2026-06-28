@@ -52,7 +52,7 @@ COMPUTED_RESULT_STATE_LIMIT = 500
 class Config:
     enabled: bool = False
     mode: str = "paper"
-    fixed_amount_usdc: float = 10.0
+    fixed_amount_usdc: float = 1.0
     max_entry_price: float = 0.51
     hard_max_entry_price: float = 0.52
     trend_deadband_pct: float = 0.00075

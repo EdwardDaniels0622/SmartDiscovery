@@ -65,6 +65,7 @@ Launchd stdout/stderr live under:
 
 - `mode=paper`
 - `enabled=false`
+- `fixed_amount_usdc=1`
 - `trade_down=true`
 - `trade_up=true`
 - fixed stake only, no martingale
