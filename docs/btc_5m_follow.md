@@ -50,6 +50,7 @@ Decisions include a `shadow_strategies` array, and simulated entries are settled
 - `delta_filter_v2`: `base_v1`, skip target-price deltas below `$5`, skip entry prices `0.31` through `0.40`
 - `price60_v3`: trend plus previous same-direction result, max price `0.60`
 - `current_side_price60_v4`: `price60_v3`, additionally require live BTC price to be on the selected side of the target price
+- `fast_c_v5`: trend plus previous same-direction result, confirmation latency at or below 25 seconds, entry price above `0.35` and at or below `0.70`
 
 When the main paper decision has already been recorded before the previous result becomes known, the script writes a separate `research_observation` event as soon as that result is available. This preserves late-confirmation samples, including confirmations after 30 seconds, for shadow strategies and offline analysis without letting them affect the main paper account.
 
@@ -82,6 +83,7 @@ Launchd stdout/stderr live under:
 - `fixed_amount_usdc=1`
 - `trade_down=true`
 - `trade_up=true`
+- C-strategy paper test: `min_entry_price=0.35`, `max_entry_price=0.70`, `max_previous_result_latency_seconds=25`
 - fixed stake only, no martingale
 - one decision per 5m market
 - no entry before 5 seconds after market open

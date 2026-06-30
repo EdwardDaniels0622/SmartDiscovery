@@ -51,6 +51,7 @@ DEFAULT_SHADOW_STRATEGIES = [
     "delta_filter_v2",
     "price60_v3",
     "current_side_price60_v4",
+    "fast_c_v5",
 ]
 
 
@@ -59,8 +60,10 @@ class Config:
     enabled: bool = False
     mode: str = "paper"
     fixed_amount_usdc: float = 1.0
+    min_entry_price: float = 0.0
     max_entry_price: float = 0.51
     hard_max_entry_price: float = 0.52
+    max_previous_result_latency_seconds: Optional[int] = None
     trend_deadband_pct: float = 0.00075
     trend_lookback_bars: int = 6
     warmup_hours: float = 3.0
@@ -112,12 +115,21 @@ class Config:
             raise ValueError("mode must be paper or live")
         if self.fixed_amount_usdc <= 0:
             raise ValueError("fixed_amount_usdc must be positive")
+        if not 0 <= self.min_entry_price < 1:
+            raise ValueError("min_entry_price must be between 0 and 1")
         if not 0 < self.max_entry_price < 1:
             raise ValueError("max_entry_price must be between 0 and 1")
         if not 0 < self.hard_max_entry_price < 1:
             raise ValueError("hard_max_entry_price must be between 0 and 1")
+        if self.min_entry_price >= self.max_entry_price:
+            raise ValueError("min_entry_price must be below max_entry_price")
         if self.max_entry_price > self.hard_max_entry_price:
             raise ValueError("max_entry_price cannot exceed hard_max_entry_price")
+        if self.max_previous_result_latency_seconds is not None:
+            self.max_previous_result_latency_seconds = max(
+                0,
+                int(self.max_previous_result_latency_seconds),
+            )
         self.trend_lookback_bars = max(1, int(self.trend_lookback_bars))
         self.confirm_streak = max(1, int(self.confirm_streak))
         self.max_consecutive_losses = max(1, int(self.max_consecutive_losses))
@@ -1285,6 +1297,11 @@ def build_decision(
     reason = "SKIP_MARKET_NOT_FOUND"
     token_id = market.token_for(selected_outcome) if market and selected_outcome else None
     best_ask = up_best_ask if selected_outcome == UP else down_best_ask if selected_outcome == DOWN else None
+    previous_result_latency_seconds = (
+        now_ts - previous_market.end_ts
+        if previous_market and previous_result in {UP, DOWN}
+        else None
+    )
 
     if market is None:
         reason = "SKIP_MARKET_NOT_FOUND"
@@ -1308,10 +1325,20 @@ def build_decision(
         reason = "SKIP_PREVIOUS_RESULT_UNKNOWN"
     elif previous_result != state.current_trend:
         reason = "SKIP_PREVIOUS_RESULT_AGAINST_TREND"
+    elif (
+        config.max_previous_result_latency_seconds is not None
+        and (
+            previous_result_latency_seconds is None
+            or previous_result_latency_seconds > config.max_previous_result_latency_seconds
+        )
+    ):
+        reason = "SKIP_PREVIOUS_RESULT_TOO_LATE"
     elif token_id is None:
         reason = "SKIP_MARKET_NOT_FOUND"
     elif best_ask is None:
         reason = "SKIP_PRICE_UNAVAILABLE"
+    elif best_ask <= config.min_entry_price:
+        reason = "SKIP_PRICE_TOO_LOW"
     elif best_ask > config.hard_max_entry_price:
         reason = "SKIP_PRICE_TOO_HIGH"
     elif best_ask > config.max_entry_price:
@@ -1345,11 +1372,7 @@ def build_decision(
         "previous_market_start": previous_market.start_iso if previous_market else "",
         "previous_market_end": previous_market.end_iso if previous_market else "",
         "previous_result_available_at": iso_utc(now_ts) if previous_result in {UP, DOWN} else "",
-        "previous_result_latency_seconds": (
-            now_ts - previous_market.end_ts
-            if previous_market and previous_result in {UP, DOWN}
-            else None
-        ),
+        "previous_result_latency_seconds": previous_result_latency_seconds,
         "previous_result_source": previous_result_source,
         "official_previous_result": official_previous_result,
         "official_previous_result_available_at": (
@@ -1394,6 +1417,10 @@ def build_decision(
         "up_best_ask": up_best_ask,
         "down_best_ask": down_best_ask,
         "fixed_amount_usdc": config.fixed_amount_usdc,
+        "min_entry_price": config.min_entry_price,
+        "max_entry_price": config.max_entry_price,
+        "hard_max_entry_price": config.hard_max_entry_price,
+        "max_previous_result_latency_seconds": config.max_previous_result_latency_seconds,
         "mode": config.mode,
         "enabled": config.enabled,
         "order_id": None,
@@ -1413,28 +1440,44 @@ def build_decision(
 def shadow_strategy_config(name: str) -> Dict[str, Any]:
     configs = {
         "base_v1": {
+            "min_entry_price": 0.0,
             "max_entry_price": 0.51,
+            "max_previous_result_latency_seconds": None,
             "min_abs_computed_delta": None,
             "excluded_price_ranges": [],
             "require_current_price_side": False,
         },
         "delta_filter_v2": {
+            "min_entry_price": 0.0,
             "max_entry_price": 0.51,
+            "max_previous_result_latency_seconds": None,
             "min_abs_computed_delta": 5.0,
             "excluded_price_ranges": [(0.31, 0.40)],
             "require_current_price_side": False,
         },
         "price60_v3": {
+            "min_entry_price": 0.0,
             "max_entry_price": 0.60,
+            "max_previous_result_latency_seconds": None,
             "min_abs_computed_delta": None,
             "excluded_price_ranges": [],
             "require_current_price_side": False,
         },
         "current_side_price60_v4": {
+            "min_entry_price": 0.0,
             "max_entry_price": 0.60,
+            "max_previous_result_latency_seconds": None,
             "min_abs_computed_delta": None,
             "excluded_price_ranges": [],
             "require_current_price_side": True,
+        },
+        "fast_c_v5": {
+            "min_entry_price": 0.35,
+            "max_entry_price": 0.70,
+            "max_previous_result_latency_seconds": 25,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
         },
     }
     return configs.get(name, configs["base_v1"])
@@ -1453,6 +1496,11 @@ def build_shadow_strategies(config: Config, decision: Dict[str, Any]) -> List[Di
         selected_outcome = str(decision.get("selected_outcome") or "")
         best_ask = parse_float(decision.get("best_ask"))
         computed_delta = parse_float(decision.get("computed_price_delta"))
+        previous_result_latency_seconds = parse_float(
+            decision.get("previous_result_latency_seconds")
+        )
+        max_latency = strategy.get("max_previous_result_latency_seconds")
+        min_entry_price = float(strategy.get("min_entry_price") or 0.0)
 
         if not decision.get("market_slug"):
             reason = "SHADOW_SKIP_MARKET_NOT_FOUND"
@@ -1468,10 +1516,17 @@ def build_shadow_strategies(config: Config, decision: Dict[str, Any]) -> List[Di
             reason = "SHADOW_SKIP_PREVIOUS_RESULT_UNKNOWN"
         elif decision.get("previous_result") != decision.get("trend"):
             reason = "SHADOW_SKIP_PREVIOUS_RESULT_AGAINST_TREND"
+        elif max_latency is not None and (
+            previous_result_latency_seconds is None
+            or previous_result_latency_seconds > float(max_latency)
+        ):
+            reason = "SHADOW_SKIP_PREVIOUS_RESULT_TOO_LATE"
         elif not decision.get("token_id"):
             reason = "SHADOW_SKIP_MARKET_NOT_FOUND"
         elif best_ask is None:
             reason = "SHADOW_SKIP_PRICE_UNAVAILABLE"
+        elif best_ask <= min_entry_price:
+            reason = "SHADOW_SKIP_PRICE_TOO_LOW"
         elif best_ask > float(strategy["max_entry_price"]):
             reason = "SHADOW_SKIP_PRICE_TOO_HIGH"
         elif price_in_excluded_range(best_ask, strategy["excluded_price_ranges"]):
@@ -1500,7 +1555,9 @@ def build_shadow_strategies(config: Config, decision: Dict[str, Any]) -> List[Di
                 else None
             ),
             "fixed_amount_usdc": config.fixed_amount_usdc,
+            "min_entry_price": min_entry_price,
             "max_entry_price": strategy["max_entry_price"],
+            "max_previous_result_latency_seconds": max_latency,
             "min_abs_computed_delta": strategy["min_abs_computed_delta"],
             "require_current_price_side": strategy["require_current_price_side"],
         }

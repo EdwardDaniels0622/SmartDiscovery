@@ -2,8 +2,10 @@
   "enabled": false,
   "mode": "paper",
   "fixed_amount_usdc": 1,
-  "max_entry_price": 0.51,
-  "hard_max_entry_price": 0.52,
+  "min_entry_price": 0.35,
+  "max_entry_price": 0.7,
+  "hard_max_entry_price": 0.7,
+  "max_previous_result_latency_seconds": 25,
   "trend_deadband_pct": 0.00075,
   "trend_lookback_bars": 6,
   "warmup_hours": 3,
@@ -35,6 +37,7 @@
     "base_v1",
     "delta_filter_v2",
     "price60_v3",
-    "current_side_price60_v4"
+    "current_side_price60_v4",
+    "fast_c_v5"
   ]
 }
