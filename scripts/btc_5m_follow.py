@@ -205,6 +205,7 @@ class State:
     last_resolved_market_slug: str = ""
     last_resolved_result: str = UNKNOWN
     last_previous_result_observed_market_slug: str = ""
+    last_research_observation_market_slug: str = ""
     last_trade_market_slug: str = ""
     daily_pnl_usdc: float = 0.0
     daily_trade_count: int = 0
@@ -1904,6 +1905,21 @@ def mark_decision_recorded(state: State, market: Optional[Market], now_ts: int) 
         state.last_decision_market_slug = market.slug
 
 
+def should_record_research_observation(
+    state: State,
+    market: Optional[Market],
+    previous_result: str,
+) -> bool:
+    if market is None or previous_result not in {UP, DOWN}:
+        return False
+    return state.last_research_observation_market_slug != market.slug
+
+
+def mark_research_observation_recorded(state: State, market: Optional[Market]) -> None:
+    if market is not None:
+        state.last_research_observation_market_slug = market.slug
+
+
 def should_retry_decision_later(decision: Dict[str, Any]) -> bool:
     return decision.get("decision_reason") in {
         "SKIP_PREVIOUS_RESULT_UNKNOWN",
@@ -1969,7 +1985,13 @@ def run_cycle(
 
     if market is not None and now_ts - market.start_ts < config.entry_delay_seconds:
         return None
-    if not should_record_decision(state, market, now_ts):
+    record_main_decision = should_record_decision(state, market, now_ts)
+    record_research_observation = should_record_research_observation(
+        state,
+        market,
+        previous_result,
+    )
+    if not record_main_decision and not record_research_observation:
         return None
 
     up_best_ask: Optional[float] = None
@@ -1996,13 +2018,25 @@ def run_cycle(
         trend_data,
         now_ts,
     )
-    decision = execute_decision(config, decision, now_ts)
-    append_jsonl(log_path, decision)
-    remember_trade(config, state, decision)
-    remember_shadow_trades(config, state, decision)
-    if not should_retry_decision_later(decision):
-        mark_decision_recorded(state, market, now_ts)
-    return decision
+    if record_main_decision:
+        decision = execute_decision(config, decision, now_ts)
+        append_jsonl(log_path, decision)
+        remember_trade(config, state, decision)
+        remember_shadow_trades(config, state, decision)
+        if record_research_observation:
+            mark_research_observation_recorded(state, market)
+        if not should_retry_decision_later(decision):
+            mark_decision_recorded(state, market, now_ts)
+        return decision
+
+    observation = dict(decision)
+    observation["event_type"] = "research_observation"
+    observation["research_reason"] = "PREVIOUS_RESULT_KNOWN_AFTER_MAIN_DECISION"
+    observation["main_decision_already_recorded"] = True
+    append_jsonl(log_path, observation)
+    remember_shadow_trades(config, state, observation)
+    mark_research_observation_recorded(state, market)
+    return observation
 
 
 def write_default_config(path: Path) -> None:

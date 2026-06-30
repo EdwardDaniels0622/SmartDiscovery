@@ -51,6 +51,8 @@ Decisions include a `shadow_strategies` array, and simulated entries are settled
 - `price60_v3`: trend plus previous same-direction result, max price `0.60`
 - `current_side_price60_v4`: `price60_v3`, additionally require live BTC price to be on the selected side of the target price
 
+When the main paper decision has already been recorded before the previous result becomes known, the script writes a separate `research_observation` event as soon as that result is available. This preserves late-confirmation samples, including confirmations after 30 seconds, for shadow strategies and offline analysis without letting them affect the main paper account.
+
 ## Launchd Paper Deployment
 
 The LaunchAgent runs from:
