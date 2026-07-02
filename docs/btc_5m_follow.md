@@ -52,10 +52,14 @@ Decisions include a `shadow_strategies` array, and simulated entries are settled
 - `current_side_price60_v4`: `price60_v3`, additionally require live BTC price to be on the selected side of the target price
 - `fast_c_v5`: trend plus previous same-direction result, confirmation latency at or below 25 seconds, entry price above `0.35` and at or below `0.70`
 - `anti_previous_result_v6`: previous-result mean reversion; buy the opposite side of the previous 5m result, require confirmation latency at or below 60 seconds, entry within the first 60 seconds, and entry price above `0.40` and at or below `0.70`
+- `anti_previous_result_v7`: v6 with a tighter entry-price window, above `0.45` and at or below `0.60`
+- `anti_previous_result_v8`: v7 plus a confirmation-latency window; previous-result latency must be above 30 seconds and at or below 60 seconds
 
 When the main paper decision has already been recorded before the previous result becomes known, the script writes a separate `research_observation` event as soon as that result is available. This preserves late-confirmation samples, including confirmations after 30 seconds, for shadow strategies and offline analysis without letting them affect the main paper account.
 
 The `anti_previous_result_v6` candidate was selected from the 2026-06-27 through 2026-07-01 paper logs using chronological replay. In that sample it produced 389 simulated entries, 248 wins / 141 losses, a 63.75% win rate, and +63.39 USDC paper PnL at 1 USDC stake. The rule was positive on each logged calendar day in the sample, but remains a shadow strategy until forward paper data confirms it out of sample.
+
+The `anti_previous_result_v7` and `anti_previous_result_v8` variants were added after the first forward paper run showed v6 was roughly flat and that narrower price and latency buckets had better forward paper results. They should be treated as live-forward research candidates, not as validated trading strategies.
 
 ## Launchd Paper Deployment
 

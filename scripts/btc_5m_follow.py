@@ -53,6 +53,8 @@ DEFAULT_SHADOW_STRATEGIES = [
     "current_side_price60_v4",
     "fast_c_v5",
     "anti_previous_result_v6",
+    "anti_previous_result_v7",
+    "anti_previous_result_v8",
 ]
 
 
@@ -1445,6 +1447,7 @@ def shadow_strategy_config(name: str) -> Dict[str, Any]:
             "min_entry_price": 0.0,
             "max_entry_price": 0.51,
             "max_seconds_after_market_open": None,
+            "min_previous_result_latency_seconds": None,
             "max_previous_result_latency_seconds": None,
             "min_abs_computed_delta": None,
             "excluded_price_ranges": [],
@@ -1455,6 +1458,7 @@ def shadow_strategy_config(name: str) -> Dict[str, Any]:
             "min_entry_price": 0.0,
             "max_entry_price": 0.51,
             "max_seconds_after_market_open": None,
+            "min_previous_result_latency_seconds": None,
             "max_previous_result_latency_seconds": None,
             "min_abs_computed_delta": 5.0,
             "excluded_price_ranges": [(0.31, 0.40)],
@@ -1465,6 +1469,7 @@ def shadow_strategy_config(name: str) -> Dict[str, Any]:
             "min_entry_price": 0.0,
             "max_entry_price": 0.60,
             "max_seconds_after_market_open": None,
+            "min_previous_result_latency_seconds": None,
             "max_previous_result_latency_seconds": None,
             "min_abs_computed_delta": None,
             "excluded_price_ranges": [],
@@ -1475,6 +1480,7 @@ def shadow_strategy_config(name: str) -> Dict[str, Any]:
             "min_entry_price": 0.0,
             "max_entry_price": 0.60,
             "max_seconds_after_market_open": None,
+            "min_previous_result_latency_seconds": None,
             "max_previous_result_latency_seconds": None,
             "min_abs_computed_delta": None,
             "excluded_price_ranges": [],
@@ -1485,6 +1491,7 @@ def shadow_strategy_config(name: str) -> Dict[str, Any]:
             "min_entry_price": 0.35,
             "max_entry_price": 0.70,
             "max_seconds_after_market_open": None,
+            "min_previous_result_latency_seconds": None,
             "max_previous_result_latency_seconds": 25,
             "min_abs_computed_delta": None,
             "excluded_price_ranges": [],
@@ -1495,6 +1502,29 @@ def shadow_strategy_config(name: str) -> Dict[str, Any]:
             "min_entry_price": 0.40,
             "max_entry_price": 0.70,
             "max_seconds_after_market_open": 60,
+            "min_previous_result_latency_seconds": None,
+            "max_previous_result_latency_seconds": 60,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
+        },
+        "anti_previous_result_v7": {
+            "side_mode": "anti_previous_result",
+            "min_entry_price": 0.45,
+            "max_entry_price": 0.60,
+            "max_seconds_after_market_open": 60,
+            "min_previous_result_latency_seconds": None,
+            "max_previous_result_latency_seconds": 60,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
+        },
+        "anti_previous_result_v8": {
+            "side_mode": "anti_previous_result",
+            "min_entry_price": 0.45,
+            "max_entry_price": 0.60,
+            "max_seconds_after_market_open": 60,
+            "min_previous_result_latency_seconds": 30,
             "max_previous_result_latency_seconds": 60,
             "min_abs_computed_delta": None,
             "excluded_price_ranges": [],
@@ -1560,6 +1590,7 @@ def build_shadow_strategies(config: Config, decision: Dict[str, Any]) -> List[Di
         previous_result_latency_seconds = parse_float(
             decision.get("previous_result_latency_seconds")
         )
+        min_latency = strategy.get("min_previous_result_latency_seconds")
         max_latency = strategy.get("max_previous_result_latency_seconds")
         max_seconds_after_open = strategy.get("max_seconds_after_market_open")
         min_entry_price = float(strategy.get("min_entry_price") or 0.0)
@@ -1596,6 +1627,11 @@ def build_shadow_strategies(config: Config, decision: Dict[str, Any]) -> List[Di
             or previous_result_latency_seconds > float(max_latency)
         ):
             reason = "SHADOW_SKIP_PREVIOUS_RESULT_TOO_LATE"
+        elif min_latency is not None and (
+            previous_result_latency_seconds is None
+            or previous_result_latency_seconds <= float(min_latency)
+        ):
+            reason = "SHADOW_SKIP_PREVIOUS_RESULT_TOO_EARLY"
         elif token_id is None:
             reason = "SHADOW_SKIP_MARKET_NOT_FOUND"
         elif best_ask is None:
@@ -1637,6 +1673,7 @@ def build_shadow_strategies(config: Config, decision: Dict[str, Any]) -> List[Di
             "min_entry_price": min_entry_price,
             "max_entry_price": strategy["max_entry_price"],
             "max_seconds_after_market_open": max_seconds_after_open,
+            "min_previous_result_latency_seconds": min_latency,
             "max_previous_result_latency_seconds": max_latency,
             "min_abs_computed_delta": strategy["min_abs_computed_delta"],
             "require_current_price_side": strategy["require_current_price_side"],

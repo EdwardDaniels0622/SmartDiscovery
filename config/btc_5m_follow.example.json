@@ -39,6 +39,8 @@
     "price60_v3",
     "current_side_price60_v4",
     "fast_c_v5",
-    "anti_previous_result_v6"
+    "anti_previous_result_v6",
+    "anti_previous_result_v7",
+    "anti_previous_result_v8"
   ]
 }
