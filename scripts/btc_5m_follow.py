@@ -55,6 +55,7 @@ DEFAULT_SHADOW_STRATEGIES = [
     "anti_previous_result_v6",
     "anti_previous_result_v7",
     "anti_previous_result_v8",
+    "last_minute_favorite_v13",
 ]
 
 
@@ -67,6 +68,7 @@ class Config:
     max_entry_price: float = 0.51
     hard_max_entry_price: float = 0.52
     max_previous_result_latency_seconds: Optional[int] = None
+    main_strategy: str = "trend_follow_v1"
     trend_deadband_pct: float = 0.00075
     trend_lookback_bars: int = 6
     warmup_hours: float = 3.0
@@ -154,6 +156,7 @@ class Config:
             ]
         elif not isinstance(self.shadow_strategies, list):
             self.shadow_strategies = []
+        self.main_strategy = str(self.main_strategy or "trend_follow_v1").strip()
         self.shadow_strategies = [
             str(item).strip()
             for item in self.shadow_strategies
@@ -221,6 +224,7 @@ class State:
     last_resolved_result: str = UNKNOWN
     last_previous_result_observed_market_slug: str = ""
     last_research_observation_market_slug: str = ""
+    last_late_observation_market_slug: str = ""
     last_trade_market_slug: str = ""
     daily_pnl_usdc: float = 0.0
     daily_trade_count: int = 0
@@ -1188,6 +1192,7 @@ def settle_open_trades(
                 "shares": shares,
                 "fixed_amount_usdc": amount,
                 "mode": trade.get("mode"),
+                "main_strategy": trade.get("main_strategy"),
                 "order_id": trade.get("order_id"),
                 "decision_reason": trade.get("decision_reason"),
                 "previous_result_source": trade.get("previous_result_source"),
@@ -1295,7 +1300,12 @@ def build_decision(
     trend_data: Dict[str, Any],
     now_ts: int,
 ) -> Dict[str, Any]:
-    selected_outcome = state.current_trend if state.current_trend in {UP, DOWN} else None
+    main_strategy_name = str(config.main_strategy or "trend_follow_v1")
+    main_strategy = shadow_strategy_config(main_strategy_name)
+    if main_strategy_name == "anti_previous_result_v12":
+        selected_outcome = opposite_outcome(previous_result)
+    else:
+        selected_outcome = state.current_trend if state.current_trend in {UP, DOWN} else None
     action = "SKIP"
     reason = "SKIP_MARKET_NOT_FOUND"
     token_id = market.token_for(selected_outcome) if market and selected_outcome else None
@@ -1312,7 +1322,13 @@ def build_decision(
         reason = "SKIP_ENTRY_DELAY"
     elif market.end_ts - now_ts <= config.latest_entry_seconds_before_close:
         reason = "SKIP_TOO_LATE_TO_ENTER"
-    elif state.current_trend not in {UP, DOWN}:
+    elif (
+        main_strategy_name == "anti_previous_result_v12"
+        and main_strategy.get("max_seconds_after_market_open") is not None
+        and now_ts - market.start_ts > float(main_strategy["max_seconds_after_market_open"])
+    ):
+        reason = "SKIP_ENTRY_TOO_LATE_FOR_STRATEGY"
+    elif main_strategy_name != "anti_previous_result_v12" and state.current_trend not in {UP, DOWN}:
         reason = "SKIP_NO_TREND"
     elif state.daily_pnl_usdc <= -abs(config.max_daily_loss_usdc):
         reason = "SKIP_DAILY_LOSS_LIMIT"
@@ -1326,7 +1342,7 @@ def build_decision(
         reason = "SKIP_DIRECTION_DISABLED"
     elif previous_result == UNKNOWN:
         reason = "SKIP_PREVIOUS_RESULT_UNKNOWN"
-    elif previous_result != state.current_trend:
+    elif main_strategy_name != "anti_previous_result_v12" and previous_result != state.current_trend:
         reason = "SKIP_PREVIOUS_RESULT_AGAINST_TREND"
     elif (
         config.max_previous_result_latency_seconds is not None
@@ -1349,8 +1365,8 @@ def build_decision(
     elif config.mode == "live" and not config.enabled:
         reason = "SKIP_LIVE_DISABLED"
     else:
-        action = "BUY_UP" if state.current_trend == UP else "BUY_DOWN"
-        reason = "ENTER_UP" if state.current_trend == UP else "ENTER_DOWN"
+        action = "BUY_UP" if selected_outcome == UP else "BUY_DOWN"
+        reason = "ENTER_UP" if selected_outcome == UP else "ENTER_DOWN"
 
     current_price_delta_to_target = (
         live_btc_price - market.price_to_beat
@@ -1424,6 +1440,7 @@ def build_decision(
         "max_entry_price": config.max_entry_price,
         "hard_max_entry_price": config.hard_max_entry_price,
         "max_previous_result_latency_seconds": config.max_previous_result_latency_seconds,
+        "main_strategy": main_strategy_name,
         "mode": config.mode,
         "enabled": config.enabled,
         "order_id": None,
@@ -1524,8 +1541,39 @@ def shadow_strategy_config(name: str) -> Dict[str, Any]:
             "min_entry_price": 0.45,
             "max_entry_price": 0.60,
             "max_seconds_after_market_open": 60,
+            "min_seconds_before_market_close": None,
+            "max_seconds_before_market_close": None,
             "min_previous_result_latency_seconds": 30,
             "max_previous_result_latency_seconds": 60,
+            "require_previous_result": True,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
+        },
+        "anti_previous_result_v12": {
+            "side_mode": "anti_previous_result",
+            "min_entry_price": 0.50,
+            "max_entry_price": 0.70,
+            "max_seconds_after_market_open": 90,
+            "min_seconds_before_market_close": None,
+            "max_seconds_before_market_close": None,
+            "min_previous_result_latency_seconds": None,
+            "max_previous_result_latency_seconds": 60,
+            "require_previous_result": True,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
+        },
+        "last_minute_favorite_v13": {
+            "side_mode": "favorite",
+            "min_entry_price": 0.70,
+            "max_entry_price": 0.98,
+            "max_seconds_after_market_open": None,
+            "min_seconds_before_market_close": 0,
+            "max_seconds_before_market_close": 60,
+            "min_previous_result_latency_seconds": None,
+            "max_previous_result_latency_seconds": None,
+            "require_previous_result": False,
             "min_abs_computed_delta": None,
             "excluded_price_ranges": [],
             "require_current_price_side": False,
@@ -1558,6 +1606,16 @@ def shadow_selected_outcome(strategy: Dict[str, Any], decision: Dict[str, Any]) 
         return current_price_side if current_price_side in {UP, DOWN} else ""
     if mode == "anti_current_price_side":
         return opposite_outcome(str(decision.get("current_price_side") or ""))
+    if mode == "favorite":
+        up_best_ask = parse_float(decision.get("up_best_ask"))
+        down_best_ask = parse_float(decision.get("down_best_ask"))
+        if up_best_ask is None or down_best_ask is None:
+            return ""
+        if up_best_ask > down_best_ask:
+            return UP
+        if down_best_ask > up_best_ask:
+            return DOWN
+        return ""
     return str(decision.get("selected_outcome") or "")
 
 
@@ -1593,6 +1651,9 @@ def build_shadow_strategies(config: Config, decision: Dict[str, Any]) -> List[Di
         min_latency = strategy.get("min_previous_result_latency_seconds")
         max_latency = strategy.get("max_previous_result_latency_seconds")
         max_seconds_after_open = strategy.get("max_seconds_after_market_open")
+        min_seconds_before_close = strategy.get("min_seconds_before_market_close")
+        max_seconds_before_close = strategy.get("max_seconds_before_market_close")
+        require_previous_result = bool(strategy.get("require_previous_result", True))
         min_entry_price = float(strategy.get("min_entry_price") or 0.0)
         seconds_after_open = int(decision.get("seconds_after_market_open") or 0)
         seconds_before_close = int(decision.get("seconds_before_market_close") or 0)
@@ -1601,7 +1662,22 @@ def build_shadow_strategies(config: Config, decision: Dict[str, Any]) -> List[Di
             reason = "SHADOW_SKIP_MARKET_NOT_FOUND"
         elif seconds_after_open < config.entry_delay_seconds:
             reason = "SHADOW_SKIP_ENTRY_DELAY"
-        elif seconds_before_close <= config.latest_entry_seconds_before_close:
+        elif seconds_before_close <= 0:
+            reason = "SHADOW_SKIP_TOO_LATE_TO_ENTER"
+        elif (
+            min_seconds_before_close is not None
+            and seconds_before_close <= float(min_seconds_before_close)
+        ):
+            reason = "SHADOW_SKIP_TOO_LATE_TO_ENTER"
+        elif (
+            max_seconds_before_close is not None
+            and seconds_before_close > float(max_seconds_before_close)
+        ):
+            reason = "SHADOW_SKIP_TOO_EARLY_FOR_STRATEGY"
+        elif (
+            max_seconds_before_close is None
+            and seconds_before_close <= config.latest_entry_seconds_before_close
+        ):
             reason = "SHADOW_SKIP_TOO_LATE_TO_ENTER"
         elif (
             max_seconds_after_open is not None
@@ -1615,7 +1691,7 @@ def build_shadow_strategies(config: Config, decision: Dict[str, Any]) -> List[Di
             reason = "SHADOW_SKIP_NO_TREND"
         elif selected_outcome not in {UP, DOWN}:
             reason = "SHADOW_SKIP_NO_OUTCOME"
-        elif decision.get("previous_result") not in {UP, DOWN}:
+        elif require_previous_result and decision.get("previous_result") not in {UP, DOWN}:
             reason = "SHADOW_SKIP_PREVIOUS_RESULT_UNKNOWN"
         elif (
             strategy.get("side_mode") == "decision"
@@ -1673,8 +1749,11 @@ def build_shadow_strategies(config: Config, decision: Dict[str, Any]) -> List[Di
             "min_entry_price": min_entry_price,
             "max_entry_price": strategy["max_entry_price"],
             "max_seconds_after_market_open": max_seconds_after_open,
+            "min_seconds_before_market_close": min_seconds_before_close,
+            "max_seconds_before_market_close": max_seconds_before_close,
             "min_previous_result_latency_seconds": min_latency,
             "max_previous_result_latency_seconds": max_latency,
+            "require_previous_result": require_previous_result,
             "min_abs_computed_delta": strategy["min_abs_computed_delta"],
             "require_current_price_side": strategy["require_current_price_side"],
         }
@@ -1780,6 +1859,7 @@ def remember_trade(config: Config, state: State, decision: Dict[str, Any]) -> No
             "entry_price": float(decision.get("entry_price") or decision.get("best_ask") or 0.0),
             "shares": float(decision.get("shares") or 0.0),
             "mode": decision.get("mode"),
+            "main_strategy": decision.get("main_strategy"),
             "order_id": decision.get("order_id"),
             "decision_reason": decision.get("decision_reason"),
             "trend": decision.get("trend"),
@@ -2094,6 +2174,20 @@ def mark_research_observation_recorded(state: State, market: Optional[Market]) -
         state.last_research_observation_market_slug = market.slug
 
 
+def should_record_late_observation(state: State, market: Optional[Market], now_ts: int) -> bool:
+    if market is None:
+        return False
+    seconds_before_close = market.end_ts - now_ts
+    if seconds_before_close <= 0 or seconds_before_close > 60:
+        return False
+    return state.last_late_observation_market_slug != market.slug
+
+
+def mark_late_observation_recorded(state: State, market: Optional[Market]) -> None:
+    if market is not None:
+        state.last_late_observation_market_slug = market.slug
+
+
 def should_retry_decision_later(decision: Dict[str, Any]) -> bool:
     return decision.get("decision_reason") in {
         "SKIP_PREVIOUS_RESULT_UNKNOWN",
@@ -2165,7 +2259,8 @@ def run_cycle(
         market,
         previous_result,
     )
-    if not record_main_decision and not record_research_observation:
+    record_late_observation = should_record_late_observation(state, market, now_ts)
+    if not record_main_decision and not record_research_observation and not record_late_observation:
         return None
 
     up_best_ask: Optional[float] = None
@@ -2204,12 +2299,19 @@ def run_cycle(
         return decision
 
     observation = dict(decision)
-    observation["event_type"] = "research_observation"
-    observation["research_reason"] = "PREVIOUS_RESULT_KNOWN_AFTER_MAIN_DECISION"
+    if record_research_observation:
+        observation["event_type"] = "research_observation"
+        observation["research_reason"] = "PREVIOUS_RESULT_KNOWN_AFTER_MAIN_DECISION"
+    else:
+        observation["event_type"] = "late_window_observation"
+        observation["research_reason"] = "LAST_MINUTE_SHADOW_WINDOW"
     observation["main_decision_already_recorded"] = True
     append_jsonl(log_path, observation)
     remember_shadow_trades(config, state, observation)
-    mark_research_observation_recorded(state, market)
+    if record_research_observation:
+        mark_research_observation_recorded(state, market)
+    if record_late_observation:
+        mark_late_observation_recorded(state, market)
     return observation
 
 

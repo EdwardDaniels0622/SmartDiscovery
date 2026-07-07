@@ -2,10 +2,11 @@
   "enabled": false,
   "mode": "paper",
   "fixed_amount_usdc": 1,
-  "min_entry_price": 0.35,
+  "min_entry_price": 0.5,
   "max_entry_price": 0.7,
   "hard_max_entry_price": 0.7,
-  "max_previous_result_latency_seconds": 25,
+  "max_previous_result_latency_seconds": 60,
+  "main_strategy": "anti_previous_result_v12",
   "trend_deadband_pct": 0.00075,
   "trend_lookback_bars": 6,
   "warmup_hours": 3,
@@ -41,6 +42,7 @@
     "fast_c_v5",
     "anti_previous_result_v6",
     "anti_previous_result_v7",
-    "anti_previous_result_v8"
+    "anti_previous_result_v8",
+    "last_minute_favorite_v13"
   ]
 }

@@ -44,6 +44,10 @@ The script also stores computed results in state and periodically checks them ag
 
 ## Shadow Strategies
 
+The main paper strategy is selected with `main_strategy`. The current research deployment uses `anti_previous_result_v12` as the main paper strategy:
+
+- `anti_previous_result_v12`: previous-result mean reversion; buy the opposite side of the previous 5m result, require confirmation latency at or below 60 seconds, enter within the first 90 seconds, and require entry price above `0.50` and at or below `0.70`
+
 Decisions include a `shadow_strategies` array, and simulated entries are settled with `shadow_settlement` JSONL events. These strategies do not call the live executor and do not affect the main paper account. Current built-ins are:
 
 - `base_v1`: trend plus previous same-direction result, max price `0.51`
@@ -54,8 +58,9 @@ Decisions include a `shadow_strategies` array, and simulated entries are settled
 - `anti_previous_result_v6`: previous-result mean reversion; buy the opposite side of the previous 5m result, require confirmation latency at or below 60 seconds, entry within the first 60 seconds, and entry price above `0.40` and at or below `0.70`
 - `anti_previous_result_v7`: v6 with a tighter entry-price window, above `0.45` and at or below `0.60`
 - `anti_previous_result_v8`: v7 plus a confirmation-latency window; previous-result latency must be above 30 seconds and at or below 60 seconds
+- `last_minute_favorite_v13`: during the final 60 seconds, buy the side with the higher ask if that ask is above `0.70` and at or below `0.98`; this does not require the previous result
 
-When the main paper decision has already been recorded before the previous result becomes known, the script writes a separate `research_observation` event as soon as that result is available. This preserves late-confirmation samples, including confirmations after 30 seconds, for shadow strategies and offline analysis without letting them affect the main paper account.
+When the main paper decision has already been recorded before the previous result becomes known, the script writes a separate `research_observation` event as soon as that result is available. This preserves late-confirmation samples, including confirmations after 30 seconds, for shadow strategies and offline analysis without letting them affect the main paper account. The script also writes one `late_window_observation` per market inside the final 60 seconds so last-minute shadow strategies can be evaluated.
 
 The `anti_previous_result_v6` candidate was selected from the 2026-06-27 through 2026-07-01 paper logs using chronological replay. In that sample it produced 389 simulated entries, 248 wins / 141 losses, a 63.75% win rate, and +63.39 USDC paper PnL at 1 USDC stake. The rule was positive on each logged calendar day in the sample, but remains a shadow strategy until forward paper data confirms it out of sample.
 
@@ -90,13 +95,13 @@ Launchd stdout/stderr live under:
 - `fixed_amount_usdc=1`
 - `trade_down=true`
 - `trade_up=true`
-- C-strategy paper test: `min_entry_price=0.35`, `max_entry_price=0.70`, `max_previous_result_latency_seconds=25`
+- current V12 paper test: `main_strategy=anti_previous_result_v12`, `min_entry_price=0.50`, `max_entry_price=0.70`, `max_previous_result_latency_seconds=60`
 - fixed stake only, no martingale
 - one decision per 5m market
 - no entry before 5 seconds after market open
 - no new entry inside the last 90 seconds
 - skip entries above `max_entry_price`, with `hard_max_entry_price` as an absolute guard
-- pause after two consecutive losses until the Binance 30m trend turns
+- research deployments can raise `max_consecutive_losses` and daily limits to avoid suppressing paper samples
 
 ## Live Mode
 
