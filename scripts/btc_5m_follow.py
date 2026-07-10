@@ -47,15 +47,15 @@ COMPUTED_RESULT_SOURCE = "computed_price_to_beat"
 COMPUTED_RESULT_CHECK_INTERVAL_SECONDS = 60
 COMPUTED_RESULT_STATE_LIMIT = 500
 DEFAULT_SHADOW_STRATEGIES = [
-    "base_v1",
-    "delta_filter_v2",
-    "price60_v3",
-    "current_side_price60_v4",
-    "fast_c_v5",
-    "anti_previous_result_v6",
-    "anti_previous_result_v7",
-    "anti_previous_result_v8",
     "last_minute_favorite_v13",
+    "last_minute_favorite_v13_75_80",
+    "last_minute_favorite_v13_80_85",
+    "last_minute_favorite_v13_85_90",
+    "last_minute_favorite_v13_90_95",
+    "last_minute_favorite_v13_95_98",
+    "last_30s_favorite_v14_80_85",
+    "last_15s_favorite_v15_80_85",
+    "last_minute_current_side_favorite_v16_80_85",
 ]
 
 
@@ -1302,33 +1302,82 @@ def build_decision(
 ) -> Dict[str, Any]:
     main_strategy_name = str(config.main_strategy or "trend_follow_v1")
     main_strategy = shadow_strategy_config(main_strategy_name)
-    if main_strategy_name == "anti_previous_result_v12":
+    main_side_mode = str(main_strategy.get("side_mode") or "decision")
+    if main_side_mode == "anti_previous_result":
         selected_outcome = opposite_outcome(previous_result)
+    elif main_side_mode == "previous_result":
+        selected_outcome = previous_result if previous_result in {UP, DOWN} else None
+    elif main_side_mode == "current_price_side":
+        selected_outcome = None
+    elif main_side_mode == "anti_current_price_side":
+        selected_outcome = None
+    elif main_side_mode == "favorite":
+        selected_outcome = favorite_outcome(up_best_ask, down_best_ask)
     else:
         selected_outcome = state.current_trend if state.current_trend in {UP, DOWN} else None
     action = "SKIP"
     reason = "SKIP_MARKET_NOT_FOUND"
     token_id = market.token_for(selected_outcome) if market and selected_outcome else None
     best_ask = up_best_ask if selected_outcome == UP else down_best_ask if selected_outcome == DOWN else None
+    main_min_entry_price = float(main_strategy.get("min_entry_price") or config.min_entry_price)
+    main_max_entry_price = float(main_strategy.get("max_entry_price") or config.max_entry_price)
+    main_hard_max_entry_price = min(float(config.hard_max_entry_price), main_max_entry_price)
+    main_min_seconds_before_close = main_strategy.get("min_seconds_before_market_close")
+    main_max_seconds_before_close = main_strategy.get("max_seconds_before_market_close")
+    main_max_seconds_after_open = main_strategy.get("max_seconds_after_market_open")
+    main_min_latency = main_strategy.get("min_previous_result_latency_seconds")
+    main_max_latency = (
+        main_strategy.get("max_previous_result_latency_seconds")
+        if main_strategy.get("max_previous_result_latency_seconds") is not None
+        else config.max_previous_result_latency_seconds
+    )
+    main_require_previous_result = bool(main_strategy.get("require_previous_result", True))
+    main_require_current_price_side = bool(main_strategy.get("require_current_price_side", False))
     previous_result_latency_seconds = (
         now_ts - previous_market.end_ts
         if previous_market and previous_result in {UP, DOWN}
         else None
     )
+    current_price_delta_to_target = (
+        live_btc_price - market.price_to_beat
+        if market and live_btc_price is not None and market.price_to_beat is not None
+        else None
+    )
+    current_price_side = result_from_price_delta(current_price_delta_to_target)
+    seconds_after_open = now_ts - market.start_ts if market else None
+    seconds_before_close = market.end_ts - now_ts if market else None
 
     if market is None:
         reason = "SKIP_MARKET_NOT_FOUND"
-    elif now_ts - market.start_ts < config.entry_delay_seconds:
+    elif seconds_after_open is not None and seconds_after_open < config.entry_delay_seconds:
         reason = "SKIP_ENTRY_DELAY"
-    elif market.end_ts - now_ts <= config.latest_entry_seconds_before_close:
+    elif seconds_before_close is not None and seconds_before_close <= 0:
         reason = "SKIP_TOO_LATE_TO_ENTER"
     elif (
-        main_strategy_name == "anti_previous_result_v12"
-        and main_strategy.get("max_seconds_after_market_open") is not None
-        and now_ts - market.start_ts > float(main_strategy["max_seconds_after_market_open"])
+        main_min_seconds_before_close is not None
+        and seconds_before_close is not None
+        and seconds_before_close <= float(main_min_seconds_before_close)
+    ):
+        reason = "SKIP_TOO_LATE_TO_ENTER"
+    elif (
+        main_max_seconds_before_close is not None
+        and seconds_before_close is not None
+        and seconds_before_close > float(main_max_seconds_before_close)
+    ):
+        reason = "SKIP_TOO_EARLY_FOR_STRATEGY"
+    elif (
+        main_max_seconds_before_close is None
+        and seconds_before_close is not None
+        and seconds_before_close <= config.latest_entry_seconds_before_close
+    ):
+        reason = "SKIP_TOO_LATE_TO_ENTER"
+    elif (
+        main_max_seconds_after_open is not None
+        and seconds_after_open is not None
+        and seconds_after_open > float(main_max_seconds_after_open)
     ):
         reason = "SKIP_ENTRY_TOO_LATE_FOR_STRATEGY"
-    elif main_strategy_name != "anti_previous_result_v12" and state.current_trend not in {UP, DOWN}:
+    elif main_side_mode == "decision" and state.current_trend not in {UP, DOWN}:
         reason = "SKIP_NO_TREND"
     elif state.daily_pnl_usdc <= -abs(config.max_daily_loss_usdc):
         reason = "SKIP_DAILY_LOSS_LIMIT"
@@ -1340,40 +1389,46 @@ def build_decision(
         reason = "SKIP_DIRECTION_DISABLED"
     elif selected_outcome == DOWN and not config.trade_down:
         reason = "SKIP_DIRECTION_DISABLED"
-    elif previous_result == UNKNOWN:
+    elif selected_outcome not in {UP, DOWN}:
+        reason = "SKIP_NO_OUTCOME"
+    elif main_require_previous_result and previous_result == UNKNOWN:
         reason = "SKIP_PREVIOUS_RESULT_UNKNOWN"
-    elif main_strategy_name != "anti_previous_result_v12" and previous_result != state.current_trend:
+    elif main_side_mode == "decision" and previous_result != state.current_trend:
         reason = "SKIP_PREVIOUS_RESULT_AGAINST_TREND"
     elif (
-        config.max_previous_result_latency_seconds is not None
+        main_max_latency is not None
         and (
             previous_result_latency_seconds is None
-            or previous_result_latency_seconds > config.max_previous_result_latency_seconds
+            or previous_result_latency_seconds > float(main_max_latency)
         )
     ):
         reason = "SKIP_PREVIOUS_RESULT_TOO_LATE"
+    elif (
+        main_min_latency is not None
+        and (
+            previous_result_latency_seconds is None
+            or previous_result_latency_seconds <= float(main_min_latency)
+        )
+    ):
+        reason = "SKIP_PREVIOUS_RESULT_TOO_EARLY"
     elif token_id is None:
         reason = "SKIP_MARKET_NOT_FOUND"
     elif best_ask is None:
         reason = "SKIP_PRICE_UNAVAILABLE"
-    elif best_ask <= config.min_entry_price:
+    elif best_ask <= main_min_entry_price:
         reason = "SKIP_PRICE_TOO_LOW"
-    elif best_ask > config.hard_max_entry_price:
+    elif best_ask > main_hard_max_entry_price:
         reason = "SKIP_PRICE_TOO_HIGH"
-    elif best_ask > config.max_entry_price:
+    elif best_ask > main_max_entry_price:
         reason = "SKIP_PRICE_TOO_HIGH"
+    elif main_require_current_price_side and current_price_side != selected_outcome:
+        reason = "SKIP_CURRENT_PRICE_AGAINST_OR_UNKNOWN"
     elif config.mode == "live" and not config.enabled:
         reason = "SKIP_LIVE_DISABLED"
     else:
         action = "BUY_UP" if selected_outcome == UP else "BUY_DOWN"
         reason = "ENTER_UP" if selected_outcome == UP else "ENTER_DOWN"
 
-    current_price_delta_to_target = (
-        live_btc_price - market.price_to_beat
-        if market and live_btc_price is not None and market.price_to_beat is not None
-        else None
-    )
-    current_price_side = result_from_price_delta(current_price_delta_to_target)
     decision = {
         "event_type": "decision",
         "timestamp": iso_utc(now_ts),
@@ -1436,11 +1491,17 @@ def build_decision(
         "up_best_ask": up_best_ask,
         "down_best_ask": down_best_ask,
         "fixed_amount_usdc": config.fixed_amount_usdc,
-        "min_entry_price": config.min_entry_price,
-        "max_entry_price": config.max_entry_price,
-        "hard_max_entry_price": config.hard_max_entry_price,
+        "min_entry_price": main_min_entry_price,
+        "max_entry_price": main_max_entry_price,
+        "hard_max_entry_price": main_hard_max_entry_price,
         "max_previous_result_latency_seconds": config.max_previous_result_latency_seconds,
         "main_strategy": main_strategy_name,
+        "main_strategy_side_mode": main_side_mode,
+        "main_strategy_max_seconds_before_market_close": main_max_seconds_before_close,
+        "main_strategy_min_seconds_before_market_close": main_min_seconds_before_close,
+        "main_strategy_max_seconds_after_market_open": main_max_seconds_after_open,
+        "main_strategy_require_previous_result": main_require_previous_result,
+        "main_strategy_require_current_price_side": main_require_current_price_side,
         "mode": config.mode,
         "enabled": config.enabled,
         "order_id": None,
@@ -1578,6 +1639,118 @@ def shadow_strategy_config(name: str) -> Dict[str, Any]:
             "excluded_price_ranges": [],
             "require_current_price_side": False,
         },
+        "last_minute_favorite_v13_75_80": {
+            "side_mode": "favorite",
+            "min_entry_price": 0.75,
+            "max_entry_price": 0.80,
+            "max_seconds_after_market_open": None,
+            "min_seconds_before_market_close": 0,
+            "max_seconds_before_market_close": 60,
+            "min_previous_result_latency_seconds": None,
+            "max_previous_result_latency_seconds": None,
+            "require_previous_result": False,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
+        },
+        "last_minute_favorite_v13_80_85": {
+            "side_mode": "favorite",
+            "min_entry_price": 0.80,
+            "max_entry_price": 0.85,
+            "max_seconds_after_market_open": None,
+            "min_seconds_before_market_close": 0,
+            "max_seconds_before_market_close": 60,
+            "min_previous_result_latency_seconds": None,
+            "max_previous_result_latency_seconds": None,
+            "require_previous_result": False,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
+        },
+        "last_minute_favorite_v13_85_90": {
+            "side_mode": "favorite",
+            "min_entry_price": 0.85,
+            "max_entry_price": 0.90,
+            "max_seconds_after_market_open": None,
+            "min_seconds_before_market_close": 0,
+            "max_seconds_before_market_close": 60,
+            "min_previous_result_latency_seconds": None,
+            "max_previous_result_latency_seconds": None,
+            "require_previous_result": False,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
+        },
+        "last_minute_favorite_v13_90_95": {
+            "side_mode": "favorite",
+            "min_entry_price": 0.90,
+            "max_entry_price": 0.95,
+            "max_seconds_after_market_open": None,
+            "min_seconds_before_market_close": 0,
+            "max_seconds_before_market_close": 60,
+            "min_previous_result_latency_seconds": None,
+            "max_previous_result_latency_seconds": None,
+            "require_previous_result": False,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
+        },
+        "last_minute_favorite_v13_95_98": {
+            "side_mode": "favorite",
+            "min_entry_price": 0.95,
+            "max_entry_price": 0.98,
+            "max_seconds_after_market_open": None,
+            "min_seconds_before_market_close": 0,
+            "max_seconds_before_market_close": 60,
+            "min_previous_result_latency_seconds": None,
+            "max_previous_result_latency_seconds": None,
+            "require_previous_result": False,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
+        },
+        "last_30s_favorite_v14_80_85": {
+            "side_mode": "favorite",
+            "min_entry_price": 0.80,
+            "max_entry_price": 0.85,
+            "max_seconds_after_market_open": None,
+            "min_seconds_before_market_close": 0,
+            "max_seconds_before_market_close": 30,
+            "min_previous_result_latency_seconds": None,
+            "max_previous_result_latency_seconds": None,
+            "require_previous_result": False,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
+        },
+        "last_15s_favorite_v15_80_85": {
+            "side_mode": "favorite",
+            "min_entry_price": 0.80,
+            "max_entry_price": 0.85,
+            "max_seconds_after_market_open": None,
+            "min_seconds_before_market_close": 0,
+            "max_seconds_before_market_close": 15,
+            "min_previous_result_latency_seconds": None,
+            "max_previous_result_latency_seconds": None,
+            "require_previous_result": False,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
+        },
+        "last_minute_current_side_favorite_v16_80_85": {
+            "side_mode": "favorite",
+            "min_entry_price": 0.80,
+            "max_entry_price": 0.85,
+            "max_seconds_after_market_open": None,
+            "min_seconds_before_market_close": 0,
+            "max_seconds_before_market_close": 60,
+            "min_previous_result_latency_seconds": None,
+            "max_previous_result_latency_seconds": None,
+            "require_previous_result": False,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": True,
+        },
     }
     return configs.get(name, configs["base_v1"])
 
@@ -1591,6 +1764,16 @@ def opposite_outcome(outcome: str) -> str:
         return DOWN
     if outcome == DOWN:
         return UP
+    return ""
+
+
+def favorite_outcome(up_best_ask: Optional[float], down_best_ask: Optional[float]) -> str:
+    if up_best_ask is None or down_best_ask is None:
+        return ""
+    if up_best_ask > down_best_ask:
+        return UP
+    if down_best_ask > up_best_ask:
+        return DOWN
     return ""
 
 
@@ -1609,13 +1792,7 @@ def shadow_selected_outcome(strategy: Dict[str, Any], decision: Dict[str, Any]) 
     if mode == "favorite":
         up_best_ask = parse_float(decision.get("up_best_ask"))
         down_best_ask = parse_float(decision.get("down_best_ask"))
-        if up_best_ask is None or down_best_ask is None:
-            return ""
-        if up_best_ask > down_best_ask:
-            return UP
-        if down_best_ask > up_best_ask:
-            return DOWN
-        return ""
+        return favorite_outcome(up_best_ask, down_best_ask)
     return str(decision.get("selected_outcome") or "")
 
 
@@ -2192,6 +2369,7 @@ def should_retry_decision_later(decision: Dict[str, Any]) -> bool:
     return decision.get("decision_reason") in {
         "SKIP_PREVIOUS_RESULT_UNKNOWN",
         "SKIP_PRICE_UNAVAILABLE",
+        "SKIP_TOO_EARLY_FOR_STRATEGY",
     }
 
 
