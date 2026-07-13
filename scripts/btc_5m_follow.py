@@ -24,7 +24,7 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 try:
     from zoneinfo import ZoneInfo
@@ -56,6 +56,8 @@ DEFAULT_SHADOW_STRATEGIES = [
     "last_30s_favorite_v14_80_85",
     "last_15s_favorite_v15_80_85",
     "last_minute_current_side_favorite_v16_80_85",
+    "last_minute_exit_v17_80_85_tp95_t20",
+    "last_minute_exit_v18_90_95_tp99_t20",
 ]
 
 
@@ -533,6 +535,17 @@ class PolymarketClient:
         return resolved_result(previous.raw), previous
 
     def best_ask(self, token_id: str) -> Optional[float]:
+        return self._book_price(token_id, "asks", min)
+
+    def best_bid(self, token_id: str) -> Optional[float]:
+        return self._book_price(token_id, "bids", max)
+
+    def _book_price(
+        self,
+        token_id: str,
+        side_key: str,
+        reducer: Callable[[List[float]], float],
+    ) -> Optional[float]:
         try:
             payload = self.http.get_json(
                 f"{self.config.clob_api_base.rstrip('/')}/book",
@@ -542,16 +555,16 @@ class PolymarketClient:
             return None
         if isinstance(payload, dict) and payload.get("error"):
             return None
-        asks = payload.get("asks") if isinstance(payload, dict) else None
+        levels = payload.get(side_key) if isinstance(payload, dict) else None
         prices = []
-        if isinstance(asks, list):
-            for level in asks:
+        if isinstance(levels, list):
+            for level in levels:
                 price = first_present(level, "price", "p")
                 try:
                     prices.append(float(price))
                 except (TypeError, ValueError):
                     continue
-        return min(prices) if prices else None
+        return reducer(prices) if prices else None
 
 
 def resolve_path(value: str) -> Path:
@@ -1230,6 +1243,75 @@ def settle_shadow_open_trades(
             end_ts = int(trade.get("market_end_ts") or 0)
         except (TypeError, ValueError):
             end_ts = 0
+        seconds_before_close = end_ts - now_ts
+        exit_target_price = parse_float(trade.get("exit_target_price"))
+        force_exit_seconds = parse_float(trade.get("force_exit_seconds_before_close"))
+        token_id = str(trade.get("token_id") or "")
+        should_check_exit = (
+            token_id
+            and seconds_before_close > 0
+            and (
+                exit_target_price is not None
+                or (
+                    force_exit_seconds is not None
+                    and seconds_before_close <= float(force_exit_seconds)
+                )
+            )
+        )
+        if should_check_exit:
+            exit_bid = polymarket.best_bid(token_id)
+            exit_reason = ""
+            if exit_bid is not None and exit_target_price is not None and exit_bid >= exit_target_price:
+                exit_reason = "SHADOW_EXIT_TARGET"
+            elif (
+                exit_bid is not None
+                and force_exit_seconds is not None
+                and seconds_before_close <= float(force_exit_seconds)
+            ):
+                exit_reason = "SHADOW_EXIT_TIME"
+            if exit_reason:
+                selected = str(trade.get("selected_outcome") or "")
+                amount = float(trade.get("amount_usdc") or 0.0)
+                entry_price = float(trade.get("entry_price") or 0.0)
+                shares = float(trade.get("shares") or 0.0)
+                pnl = shares * exit_bid - amount
+                append_jsonl(
+                    log_path,
+                    {
+                        "event_type": "shadow_exit",
+                        "timestamp": iso_utc(now_ts),
+                        "strategy_name": trade.get("strategy_name"),
+                        "market_slug": str(trade.get("market_slug") or ""),
+                        "market_start": trade.get("market_start"),
+                        "market_end": trade.get("market_end"),
+                        "selected_outcome": selected,
+                        "token_id": token_id,
+                        "entry_price": entry_price,
+                        "exit_price": exit_bid,
+                        "exit_reason": exit_reason,
+                        "exit_target_price": exit_target_price,
+                        "force_exit_seconds_before_close": force_exit_seconds,
+                        "seconds_before_market_close": seconds_before_close,
+                        "shares": shares,
+                        "fixed_amount_usdc": amount,
+                        "pnl_usdc": round(pnl, 8),
+                        "result": "WIN" if pnl > 0 else "LOSS",
+                        "trend": trade.get("trend"),
+                        "ret_30m": trade.get("ret_30m"),
+                        "previous_result": trade.get("previous_result"),
+                        "previous_result_source": trade.get("previous_result_source"),
+                        "computed_previous_result": trade.get("computed_previous_result"),
+                        "previous_price_to_beat": trade.get("previous_price_to_beat"),
+                        "previous_final_price": trade.get("previous_final_price"),
+                        "current_price_to_beat": trade.get("current_price_to_beat"),
+                        "computed_price_delta": trade.get("computed_price_delta"),
+                        "computed_result_latency_seconds": trade.get("computed_result_latency_seconds"),
+                        "binance_live_price": trade.get("binance_live_price"),
+                        "current_price_delta_to_target": trade.get("current_price_delta_to_target"),
+                        "current_price_side": trade.get("current_price_side"),
+                    },
+                )
+                continue
         if end_ts + config.settlement_check_delay_seconds > now_ts:
             remaining.append(trade)
             continue
@@ -1751,6 +1833,38 @@ def shadow_strategy_config(name: str) -> Dict[str, Any]:
             "excluded_price_ranges": [],
             "require_current_price_side": True,
         },
+        "last_minute_exit_v17_80_85_tp95_t20": {
+            "side_mode": "favorite",
+            "min_entry_price": 0.80,
+            "max_entry_price": 0.85,
+            "max_seconds_after_market_open": None,
+            "min_seconds_before_market_close": 20,
+            "max_seconds_before_market_close": 60,
+            "min_previous_result_latency_seconds": None,
+            "max_previous_result_latency_seconds": None,
+            "require_previous_result": False,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
+            "exit_target_price": 0.95,
+            "force_exit_seconds_before_close": 20,
+        },
+        "last_minute_exit_v18_90_95_tp99_t20": {
+            "side_mode": "favorite",
+            "min_entry_price": 0.90,
+            "max_entry_price": 0.95,
+            "max_seconds_after_market_open": None,
+            "min_seconds_before_market_close": 20,
+            "max_seconds_before_market_close": 60,
+            "min_previous_result_latency_seconds": None,
+            "max_previous_result_latency_seconds": None,
+            "require_previous_result": False,
+            "min_abs_computed_delta": None,
+            "excluded_price_ranges": [],
+            "require_current_price_side": False,
+            "exit_target_price": 0.99,
+            "force_exit_seconds_before_close": 20,
+        },
     }
     return configs.get(name, configs["base_v1"])
 
@@ -1914,6 +2028,7 @@ def build_shadow_strategies(config: Config, decision: Dict[str, Any]) -> List[Di
             "action": action,
             "decision_reason": reason,
             "selected_outcome": selected_outcome,
+            "token_id": token_id,
             "best_ask": best_ask,
             "entry_price": best_ask if action.startswith("SHADOW_BUY_") else None,
             "shares": (
@@ -1933,6 +2048,8 @@ def build_shadow_strategies(config: Config, decision: Dict[str, Any]) -> List[Di
             "require_previous_result": require_previous_result,
             "min_abs_computed_delta": strategy["min_abs_computed_delta"],
             "require_current_price_side": strategy["require_current_price_side"],
+            "exit_target_price": strategy.get("exit_target_price"),
+            "force_exit_seconds_before_close": strategy.get("force_exit_seconds_before_close"),
         }
         shadows.append(shadow)
     return shadows
@@ -2085,9 +2202,12 @@ def remember_shadow_trades(config: Config, state: State, decision: Dict[str, Any
                 "market_start_ts": decision.get("market_start_ts"),
                 "market_end_ts": decision.get("market_end_ts"),
                 "selected_outcome": shadow.get("selected_outcome"),
+                "token_id": shadow.get("token_id"),
                 "amount_usdc": float(shadow.get("fixed_amount_usdc") or config.fixed_amount_usdc),
                 "entry_price": best_ask,
                 "shares": float(shadow.get("shares") or 0.0),
+                "exit_target_price": shadow.get("exit_target_price"),
+                "force_exit_seconds_before_close": shadow.get("force_exit_seconds_before_close"),
                 "decision_reason": shadow.get("decision_reason"),
                 "trend": decision.get("trend"),
                 "ret_30m": decision.get("ret_30m"),

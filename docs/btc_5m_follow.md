@@ -67,8 +67,12 @@ Decisions include a `shadow_strategies` array, and simulated entries are settled
 - `last_30s_favorite_v14_80_85`: v13 `0.80-0.85` bucket restricted to the final 30 seconds
 - `last_15s_favorite_v15_80_85`: v13 `0.80-0.85` bucket restricted to the final 15 seconds
 - `last_minute_current_side_favorite_v16_80_85`: v13 `0.80-0.85` bucket, additionally requiring the live BTC price to already be on the selected side of the target
+- `last_minute_exit_v17_80_85_tp95_t20`: v13 `0.80-0.85` bucket between 60 and 20 seconds before close; simulate selling at bid when bid reaches `0.95`, otherwise force an exit at the current bid inside the final 20 seconds
+- `last_minute_exit_v18_90_95_tp99_t20`: v13 `0.90-0.95` bucket between 60 and 20 seconds before close; simulate selling at bid when bid reaches `0.99`, otherwise force an exit at the current bid inside the final 20 seconds
 
 When the main paper decision has already been recorded before the previous result becomes known, the script writes a separate `research_observation` event as soon as that result is available. This preserves late-confirmation samples, including confirmations after 30 seconds, for shadow strategies and offline analysis without letting them affect the main paper account. The script also writes one `late_window_observation` per market inside the final 60 seconds so last-minute shadow strategies can be evaluated.
+
+Exit-shadow strategies write `shadow_exit` events when they close before settlement. Their PnL is simulated from CLOB bid liquidity (`shares * exit_bid - fixed_amount_usdc`). If no exit condition is met or no bid is available, the open shadow trade falls back to normal `shadow_settlement`.
 
 The `anti_previous_result_v6` candidate was selected from the 2026-06-27 through 2026-07-01 paper logs using chronological replay. In that sample it produced 389 simulated entries, 248 wins / 141 losses, a 63.75% win rate, and +63.39 USDC paper PnL at 1 USDC stake. The rule was positive on each logged calendar day in the sample, but remains a shadow strategy until forward paper data confirms it out of sample.
 
