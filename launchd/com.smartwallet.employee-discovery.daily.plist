@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.smartwallet.employee-discovery.daily</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>/Users/will/Library/Application Support/smart-wallet-discovery/scripts/scan_employee_domains_daily.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/will/Library/Application Support/smart-wallet-discovery</string>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>LowPriorityIO</key>
+  <true/>
+
+  <key>Nice</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/will/Library/Logs/smart-wallet-discovery/employee-discovery-daily.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/will/Library/Logs/smart-wallet-discovery/employee-discovery-daily.err</string>
+</dict>
+</plist>

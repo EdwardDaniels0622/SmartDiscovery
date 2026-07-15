@@ -4,6 +4,10 @@ use std::{error::Error, fmt, process::Command};
 
 const DEFAULT_DATA_API_BASE: &str = "https://data-api.polymarket.com";
 const DEFAULT_PROXY_URL: &str = "http://127.0.0.1:7890";
+const ACTIVITY_CONNECT_TIMEOUT_SECONDS: u64 = 3;
+const ACTIVITY_MAX_TIME_SECONDS: u64 = 6;
+const ACTIVITY_FALLBACK_CONNECT_TIMEOUT_SECONDS: u64 = 2;
+const ACTIVITY_FALLBACK_MAX_TIME_SECONDS: u64 = 4;
 
 #[derive(Debug, Clone)]
 pub struct PolymarketDataClient {
@@ -76,6 +80,24 @@ impl PolymarketDataClient {
         self.get_json(&url, &query)
     }
 
+    pub fn closed_positions_history(
+        &self,
+        user: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ClosedPosition>, PolymarketError> {
+        let url = format!("{}/closed-positions", self.base_url);
+        let query = [
+            ("user", user.to_owned()),
+            ("limit", limit.clamp(1, 50).to_string()),
+            ("offset", offset.to_string()),
+            ("sortBy", "TIMESTAMP".to_owned()),
+            ("sortDirection", "DESC".to_owned()),
+        ];
+
+        self.get_json_with_timeouts(&url, &query, 20, 60)
+    }
+
     pub fn positions(
         &self,
         user: &str,
@@ -92,6 +114,42 @@ impl PolymarketDataClient {
         ];
 
         self.get_json(&url, &query)
+    }
+
+    pub fn positions_fast(
+        &self,
+        user: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<CurrentPosition>, PolymarketError> {
+        let url = format!("{}/positions", self.base_url);
+        let query = [
+            ("user", user.to_owned()),
+            ("limit", limit.clamp(1, 50).to_string()),
+            ("offset", offset.to_string()),
+            ("sortBy", "CASHPNL".to_owned()),
+            ("sortDirection", "ASC".to_owned()),
+        ];
+
+        self.get_activity_json_with_failover(&url, &query)
+    }
+
+    pub fn positions_history(
+        &self,
+        user: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<CurrentPosition>, PolymarketError> {
+        let url = format!("{}/positions", self.base_url);
+        let query = [
+            ("user", user.to_owned()),
+            ("limit", limit.clamp(1, 50).to_string()),
+            ("offset", offset.to_string()),
+            ("sortBy", "CASHPNL".to_owned()),
+            ("sortDirection", "ASC".to_owned()),
+        ];
+
+        self.get_json_with_timeouts(&url, &query, 20, 60)
     }
 
     pub fn trades(
@@ -117,6 +175,44 @@ impl PolymarketDataClient {
         self.get_json(&url, &query)
     }
 
+    pub fn trades_history(
+        &self,
+        user: &str,
+        limit: usize,
+        offset: usize,
+        side: Option<&str>,
+    ) -> Result<Vec<UserTrade>, PolymarketError> {
+        let url = format!("{}/trades", self.base_url);
+        let mut query = vec![
+            ("user", user.to_owned()),
+            ("limit", limit.clamp(1, 100).to_string()),
+            ("offset", offset.to_string()),
+        ];
+        if let Some(side) = side {
+            query.push(("side", side.to_owned()));
+        }
+
+        self.get_json_with_timeouts(&url, &query, 20, 60)
+    }
+
+    pub fn global_trades(
+        &self,
+        limit: usize,
+        offset: usize,
+        side: Option<&str>,
+    ) -> Result<Vec<UserTrade>, PolymarketError> {
+        let url = format!("{}/trades", self.base_url);
+        let limit = limit.clamp(1, 100).to_string();
+        let offset = offset.to_string();
+        let mut query = vec![("limit", limit), ("offset", offset)];
+
+        if let Some(side) = side {
+            query.push(("side", side.to_owned()));
+        }
+
+        self.get_json(&url, &query)
+    }
+
     pub fn activity(
         &self,
         user: &str,
@@ -130,10 +226,110 @@ impl PolymarketDataClient {
             ("offset", offset.to_string()),
         ];
 
-        self.get_json(&url, &query)
+        self.get_json_with_timeouts(&url, &query, 4, 10)
+    }
+
+    pub fn activity_history(
+        &self,
+        user: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<UserTrade>, PolymarketError> {
+        let url = format!("{}/activity", self.base_url);
+        let query = [
+            ("user", user.to_owned()),
+            ("limit", limit.clamp(1, 100).to_string()),
+            ("offset", offset.to_string()),
+        ];
+
+        self.get_json_with_timeouts(&url, &query, 20, 60)
     }
 
     fn get_json<T>(&self, url: &str, query: &[(&str, String)]) -> Result<T, PolymarketError>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        self.get_json_with_timeouts(url, query, 8, 20)
+    }
+
+    fn get_json_with_timeouts<T>(
+        &self,
+        url: &str,
+        query: &[(&str, String)],
+        connect_timeout_seconds: u64,
+        max_time_seconds: u64,
+    ) -> Result<T, PolymarketError>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        self.get_json_with_timeouts_via(
+            url,
+            query,
+            connect_timeout_seconds,
+            max_time_seconds,
+            self.proxy_url.as_deref(),
+        )
+    }
+
+    fn get_activity_json_with_failover<T>(
+        &self,
+        url: &str,
+        query: &[(&str, String)],
+    ) -> Result<T, PolymarketError>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        match self.get_json_with_timeouts_via(
+            url,
+            query,
+            ACTIVITY_CONNECT_TIMEOUT_SECONDS,
+            ACTIVITY_MAX_TIME_SECONDS,
+            self.proxy_url.as_deref(),
+        ) {
+            Ok(value) => Ok(value),
+            Err(primary_error) => {
+                if !is_retryable_hot_path_error(&primary_error) {
+                    return Err(primary_error);
+                }
+                let Some(fallback_proxy_url) = self.activity_fallback_proxy_url() else {
+                    return Err(primary_error);
+                };
+                if fallback_proxy_url.as_deref() == self.proxy_url.as_deref() {
+                    return Err(primary_error);
+                }
+
+                self.get_json_with_timeouts_via(
+                    url,
+                    query,
+                    ACTIVITY_FALLBACK_CONNECT_TIMEOUT_SECONDS,
+                    ACTIVITY_FALLBACK_MAX_TIME_SECONDS,
+                    fallback_proxy_url.as_deref(),
+                )
+                .map_err(|fallback_error| PolymarketError::Failover {
+                    primary: Box::new(primary_error),
+                    fallback_route: route_label(fallback_proxy_url.as_deref()),
+                    fallback: Box::new(fallback_error),
+                })
+            }
+        }
+    }
+
+    fn activity_fallback_proxy_url(&self) -> Option<Option<String>> {
+        if let Ok(value) = std::env::var("POLYMARKET_ACTIVITY_FALLBACK_PROXY_URL") {
+            return Some(normalize_proxy_url(value));
+        }
+
+        self.proxy_url.as_ref().map(|_| None)
+    }
+
+    fn get_json_with_timeouts_via<T>(
+        &self,
+        url: &str,
+        query: &[(&str, String)],
+        connect_timeout_seconds: u64,
+        max_time_seconds: u64,
+        proxy_url: Option<&str>,
+    ) -> Result<T, PolymarketError>
     where
         T: for<'de> Deserialize<'de>,
     {
@@ -144,14 +340,14 @@ impl PolymarketDataClient {
             "--show-error",
             "--location",
             "--connect-timeout",
-            "8",
+            &connect_timeout_seconds.to_string(),
             "--max-time",
-            "20",
+            &max_time_seconds.to_string(),
             "--get",
             url,
         ]);
 
-        if let Some(proxy_url) = &self.proxy_url {
+        if let Some(proxy_url) = proxy_url {
             command.args(["--proxy", proxy_url]);
         }
 
@@ -192,11 +388,39 @@ fn normalize_proxy_url(proxy_url: String) -> Option<String> {
     }
 }
 
+fn is_retryable_hot_path_error(error: &PolymarketError) -> bool {
+    match error {
+        PolymarketError::Command(_) => true,
+        PolymarketError::Status { code, stderr } => {
+            if *code == Some(22) && stderr.contains("400") {
+                return false;
+            }
+            true
+        }
+        PolymarketError::Json(_) => false,
+        PolymarketError::Failover { .. } => true,
+    }
+}
+
+fn route_label(proxy_url: Option<&str>) -> String {
+    proxy_url
+        .map(|url| format!("proxy {url}"))
+        .unwrap_or_else(|| "direct".to_owned())
+}
+
 #[derive(Debug)]
 pub enum PolymarketError {
     Command(std::io::Error),
-    Status { code: Option<i32>, stderr: String },
+    Status {
+        code: Option<i32>,
+        stderr: String,
+    },
     Json(serde_json::Error),
+    Failover {
+        primary: Box<PolymarketError>,
+        fallback_route: String,
+        fallback: Box<PolymarketError>,
+    },
 }
 
 impl fmt::Display for PolymarketError {
@@ -207,6 +431,14 @@ impl fmt::Display for PolymarketError {
                 write!(f, "curl exited with code {code:?}: {stderr}")
             }
             Self::Json(error) => write!(f, "failed to parse Polymarket JSON: {error}"),
+            Self::Failover {
+                primary,
+                fallback_route,
+                fallback,
+            } => write!(
+                f,
+                "primary /activity route failed: {primary}; fallback route {fallback_route} failed: {fallback}"
+            ),
         }
     }
 }

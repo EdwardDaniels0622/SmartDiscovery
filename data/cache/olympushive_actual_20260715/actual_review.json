@@ -1,0 +1,3032 @@
+{
+  "generatedAt": "2026-07-15 11:07:16",
+  "tradeCount": 697,
+  "eventCount": 51,
+  "reports": [
+    {
+      "slug": "highest-temperature-in-seoul-on-july-10-2026",
+      "city": "Seoul",
+      "date": "July 10",
+      "buyU": 546.109835,
+      "sellU": 507.63235,
+      "buyN": 13,
+      "sellN": 4,
+      "first": 1783620826,
+      "last": 1783659577,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "28°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "106243854098843660105562226610273254243856639047571595194891739408867024073507",
+          "question": "Will the highest temperature in Seoul be 27°C on July 10?",
+          "band": "27°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 1583.44,
+          "buyCost": 450.91471,
+          "sellSize": 1583.44,
+          "sellProceeds": 446.88694,
+          "buyN": 3,
+          "sellN": 2,
+          "net": 0,
+          "avg": 0.28476905345324105,
+          "pnl": -4.027770000000032,
+          "finalValue": 0
+        },
+        {
+          "asset": "49927541343484492125019860543710533283601541629250478894178329422031109426892",
+          "question": "Will the highest temperature in Seoul be 28°C on July 10?",
+          "band": "28°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 1,
+          "buySize": 132.464284,
+          "buyCost": 50.546155,
+          "sellSize": 125,
+          "sellProceeds": 45.19806,
+          "buyN": 2,
+          "sellN": 1,
+          "net": 7.464283999999992,
+          "avg": 0.3815832726654077,
+          "pnl": 2.1161889999999914,
+          "finalValue": 7.464283999999992
+        },
+        {
+          "asset": "39589338513611250846398971766385767664268300204066587423613336959884104886859",
+          "question": "Will the highest temperature in Seoul be 26°C on July 10?",
+          "band": "26°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 500,
+          "buyCost": 37.14897,
+          "sellSize": 500,
+          "sellProceeds": 15.54735,
+          "buyN": 1,
+          "sellN": 1,
+          "net": 0,
+          "avg": 0.07429793999999999,
+          "pnl": -21.601619999999997,
+          "finalValue": 0
+        },
+        {
+          "asset": "9219815411947393361084774571601995837451847790413576067867824230099931272251",
+          "question": "Will the highest temperature in Seoul be 30°C on July 10?",
+          "band": "30°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 500,
+          "buyCost": 7.5,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 7,
+          "sellN": 0,
+          "net": 500,
+          "avg": 0.015,
+          "pnl": -7.5,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -31.013201000000038,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-seoul-on-july-14-2026",
+      "city": "Seoul",
+      "date": "July 14",
+      "buyU": 474.54816199999993,
+      "sellU": 834.6542770000001,
+      "buyN": 37,
+      "sellN": 40,
+      "first": 1783970935,
+      "last": 1784006347,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "32°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "61603030752121072577228246148213156625373397256469623240829151766826649604526",
+          "question": "Will the highest temperature in Seoul be 32°C on July 14?",
+          "band": "32°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 1,
+          "buySize": 627.01,
+          "buyCost": 231.92587,
+          "sellSize": 627.01,
+          "sellProceeds": 446.81624,
+          "buyN": 2,
+          "sellN": 4,
+          "net": 0,
+          "avg": 0.3698918199071785,
+          "pnl": 214.89037,
+          "finalValue": 0
+        },
+        {
+          "asset": "70993606539485693351224784892368325791929469991348445920678387444642615320187",
+          "question": "Will the highest temperature in Seoul be 29°C on July 14?",
+          "band": "29°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 1523.4862670000002,
+          "buyCost": 216.122432,
+          "sellSize": 1293.3586,
+          "sellProceeds": 331.823617,
+          "buyN": 32,
+          "sellN": 32,
+          "net": 230.1276670000002,
+          "avg": 0.14186043988803476,
+          "pnl": 115.70118500000001,
+          "finalValue": 0
+        },
+        {
+          "asset": "7627822132040487211107378434747130147288096311417318486720113183347741356548",
+          "question": "Will the highest temperature in Seoul be 33°C on July 14?",
+          "band": "33°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 862.5,
+          "buyCost": 24.4433,
+          "sellSize": 363.76,
+          "sellProceeds": 56.01442,
+          "buyN": 2,
+          "sellN": 4,
+          "net": 498.74,
+          "avg": 0.028340057971014493,
+          "pnl": 31.57112,
+          "finalValue": 0
+        },
+        {
+          "asset": "73902525946608203379904650702531827905117340915438610830754579316790051069468",
+          "question": "Will the highest temperature in Seoul be 34°C on July 14?",
+          "band": "34°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 48.98,
+          "buyCost": 2.05656,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 48.98,
+          "avg": 0.041987750102082486,
+          "pnl": -2.05656,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": 360.106115,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-shenzhen-on-july-13-2026",
+      "city": "Shenzhen",
+      "date": "July 13",
+      "buyU": 461.53967500000005,
+      "sellU": 363.62064000000004,
+      "buyN": 25,
+      "sellN": 10,
+      "first": 1783918691,
+      "last": 1783942102,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "34°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "114903888207099478013765578021692544421726315836675022752190739831585063907299",
+          "question": "Will the highest temperature in Shenzhen be 33°C on July 13?",
+          "band": "33°C",
+          "tokenOutcome": "No",
+          "settlePrice": 1,
+          "buySize": 277.75,
+          "buyCost": 256.34932,
+          "sellSize": 277.75,
+          "sellProceeds": 276.30945,
+          "buyN": 4,
+          "sellN": 1,
+          "net": 0,
+          "avg": 0.9229498469846984,
+          "pnl": 19.96013000000005,
+          "finalValue": 0
+        },
+        {
+          "asset": "9588885747006284752678330387754706765237573162469429188579741766624424966554",
+          "question": "Will the highest temperature in Shenzhen be 32°C on July 13?",
+          "band": "32°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 1118.731606,
+          "buyCost": 151.825915,
+          "sellSize": 1118.7299999999998,
+          "sellProceeds": 28.063460000000003,
+          "buyN": 20,
+          "sellN": 8,
+          "net": 0.0016060000002653396,
+          "avg": 0.13571254641034966,
+          "pnl": -123.762455,
+          "finalValue": 0
+        },
+        {
+          "asset": "49609093796401928191180558465293086523286106769271962399302185632456930053634",
+          "question": "Will the highest temperature in Shenzhen be 34°C on July 13?",
+          "band": "34°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 1,
+          "buySize": 59.31,
+          "buyCost": 53.36444,
+          "sellSize": 59.31,
+          "sellProceeds": 59.24773,
+          "buyN": 1,
+          "sellN": 1,
+          "net": 0,
+          "avg": 0.8997545102006407,
+          "pnl": 5.883289999999995,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -97.91903499999995,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-nyc-on-july-14-2026",
+      "city": "New York City",
+      "date": "July 14",
+      "buyU": 331.008995,
+      "sellU": 9.239989999999999,
+      "buyN": 33,
+      "sellN": 2,
+      "first": 1784006770,
+      "last": 1784060764,
+      "winner": {
+        "status": "open",
+        "winners": []
+      },
+      "outcomes": [
+        {
+          "asset": "50631377629168177387633746182791543312421772495870345944188868275204210213210",
+          "question": "Will the highest temperature in New York City be between 94-95°F on July 14?",
+          "band": "94-95°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.0005,
+          "buySize": 758.9382330000001,
+          "buyCost": 223.90943499999997,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 3,
+          "sellN": 0,
+          "net": 758.9382330000001,
+          "avg": 0.2950298525809016,
+          "pnl": -223.52996588349998,
+          "finalValue": 0.37946911650000004
+        },
+        {
+          "asset": "44760230865131597186815794503435380100117087598962284234255077899335815511847",
+          "question": "Will the highest temperature in New York City be between 92-93°F on July 14?",
+          "band": "92-93°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.999,
+          "buySize": 810.7996660000001,
+          "buyCost": 69.45155,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 18,
+          "sellN": 0,
+          "net": 810.7996660000001,
+          "avg": 0.08565808905994293,
+          "pnl": 740.5373163340001,
+          "finalValue": 809.9888663340001
+        },
+        {
+          "asset": "101148357857436353467149251545200748136151556790846111697959582546562863027791",
+          "question": "Will the highest temperature in New York City be between 90-91°F on July 14?",
+          "band": "90-91°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.0005,
+          "buySize": 829.2900000000001,
+          "buyCost": 15.835,
+          "sellSize": 144.84,
+          "sellProceeds": 2.1167,
+          "buyN": 3,
+          "sellN": 1,
+          "net": 684.45,
+          "avg": 0.01909464722835196,
+          "pnl": -13.376075,
+          "finalValue": 0.34222500000000006
+        },
+        {
+          "asset": "48643807323915870431224116165959129687780392278979844767241583568643621917070",
+          "question": "Will the highest temperature in New York City be between 96-97°F on July 14?",
+          "band": "96-97°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.0005,
+          "buySize": 172.20000000000002,
+          "buyCost": 8.610000000000001,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 6,
+          "sellN": 0,
+          "net": 172.20000000000002,
+          "avg": 0.05,
+          "pnl": -8.523900000000001,
+          "finalValue": 0.08610000000000001
+        },
+        {
+          "asset": "112446357725960900637937112096863168782632741565085956938155997833967562950533",
+          "question": "Will the highest temperature in New York City be between 88-89°F on July 14?",
+          "band": "88-89°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.0005,
+          "buySize": 975.8,
+          "buyCost": 7.71126,
+          "sellSize": 600.71,
+          "sellProceeds": 7.12329,
+          "buyN": 2,
+          "sellN": 1,
+          "net": 375.0899999999999,
+          "avg": 0.007902500512400082,
+          "pnl": -0.40042500000000025,
+          "finalValue": 0.18754499999999996
+        },
+        {
+          "asset": "22545237711350281854450378962530689275758775741524713143487035920725401190156",
+          "question": "Will the highest temperature in New York City be 87°F or below on July 14?",
+          "band": "87°F or below",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.0005,
+          "buySize": 1311.68,
+          "buyCost": 5.49175,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 1311.68,
+          "avg": 0.004186806233227616,
+          "pnl": -4.835909999999999,
+          "finalValue": 0.6558400000000001
+        }
+      ],
+      "estimatedPnl": 489.87104045050006,
+      "closed": false
+    },
+    {
+      "slug": "highest-temperature-in-nyc-on-july-9-2026",
+      "city": "New York City",
+      "date": "July 9",
+      "buyU": 320.09678999999994,
+      "sellU": 719.235048,
+      "buyN": 8,
+      "sellN": 9,
+      "first": 1783613068,
+      "last": 1783621111,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "86-87°F"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "84236976582404079230822601687727784390590330486791782736570018031898263138743",
+          "question": "Will the highest temperature in New York City be between 84-85°F on July 9?",
+          "band": "84-85°F",
+          "tokenOutcome": "No",
+          "settlePrice": 1,
+          "buySize": 297.19,
+          "buyCost": 248.2766,
+          "sellSize": 297.19,
+          "sellProceeds": 296.87797,
+          "buyN": 6,
+          "sellN": 1,
+          "net": 0,
+          "avg": 0.8354137084020323,
+          "pnl": 48.60137,
+          "finalValue": 0
+        },
+        {
+          "asset": "88938188381591374473700876821799526063877605109273754047067718393560957582723",
+          "question": "Will the highest temperature in New York City be between 86-87°F on July 9?",
+          "band": "86-87°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 1,
+          "buySize": 162.67000000000002,
+          "buyCost": 71.82019,
+          "sellSize": 162.66,
+          "sellProceeds": 65.86329,
+          "buyN": 2,
+          "sellN": 1,
+          "net": 0.010000000000019327,
+          "avg": 0.44150851416979153,
+          "pnl": -5.946899999999971,
+          "finalValue": 0.010000000000019327
+        },
+        {
+          "asset": "23461436258130880670870163964281003113822652085174587727538543894860490866900",
+          "question": "Will the highest temperature in New York City be between 88-89°F on July 9?",
+          "band": "88-89°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 0,
+          "buyCost": 0,
+          "sellSize": 390.67,
+          "sellProceeds": 18.73559,
+          "buyN": 0,
+          "sellN": 5,
+          "net": -390.67,
+          "avg": 0,
+          "pnl": 18.73559,
+          "finalValue": 0
+        },
+        {
+          "asset": "8670493152337749153699089294255689161379115650133629711136471627811956359687",
+          "question": "Will the highest temperature in New York City be between 82-83°F on July 9?",
+          "band": "82-83°F",
+          "tokenOutcome": "No",
+          "settlePrice": 1,
+          "buySize": 0,
+          "buyCost": 0,
+          "sellSize": 338.09780600000005,
+          "sellProceeds": 337.758198,
+          "buyN": 0,
+          "sellN": 2,
+          "net": -338.09780600000005,
+          "avg": 0,
+          "pnl": -0.3396080000000552,
+          "finalValue": -338.09780600000005
+        }
+      ],
+      "estimatedPnl": 61.05045199999998,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-houston-on-july-9-2026",
+      "city": "Houston",
+      "date": "July 9",
+      "buyU": 266.55099,
+      "sellU": 153.47382,
+      "buyN": 4,
+      "sellN": 8,
+      "first": 1783622878,
+      "last": 1783623985,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "92-93°F"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "93348364380516115217646291015380896074056250681803106222891341657818107479883",
+          "question": "Will the highest temperature in Houston be between 92-93°F on July 9?",
+          "band": "92-93°F",
+          "tokenOutcome": "No",
+          "settlePrice": 0,
+          "buySize": 253.91,
+          "buyCost": 246.14831,
+          "sellSize": 253.91,
+          "sellProceeds": 146.18984,
+          "buyN": 1,
+          "sellN": 7,
+          "net": 0,
+          "avg": 0.9694313339372219,
+          "pnl": -99.95847,
+          "finalValue": 0
+        },
+        {
+          "asset": "75214273411152327464776463567828426534756539453180177570172174096291657015594",
+          "question": "Will the highest temperature in Houston be between 94-95°F on July 9?",
+          "band": "94-95°F",
+          "tokenOutcome": "No",
+          "settlePrice": 1,
+          "buySize": 34.54,
+          "buyCost": 14.92749,
+          "sellSize": 34.54,
+          "sellProceeds": 7.28398,
+          "buyN": 1,
+          "sellN": 1,
+          "net": 0,
+          "avg": 0.4321797915460336,
+          "pnl": -7.643510000000001,
+          "finalValue": 0
+        },
+        {
+          "asset": "93051038146145986881392736600530925270608371194636959990649380157171006412282",
+          "question": "Will the highest temperature in Houston be between 96-97°F on July 9?",
+          "band": "96-97°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 92.19,
+          "buyCost": 5.47519,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 2,
+          "sellN": 0,
+          "net": 92.19,
+          "avg": 0.059390280941533785,
+          "pnl": -5.47519,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -113.07717000000001,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-hong-kong-on-july-14-2026",
+      "city": "Hong Kong",
+      "date": "July 14",
+      "buyU": 228.33989000000003,
+      "sellU": 592.832267,
+      "buyN": 15,
+      "sellN": 11,
+      "first": 1783968014,
+      "last": 1784034542,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "28°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "112811270123909058128388564316112365223404956068228201113475262755116373337166",
+          "question": "Will the highest temperature in Hong Kong be 28°C on July 14?",
+          "band": "28°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 1,
+          "buySize": 1188.3400000000001,
+          "buyCost": 214.3736,
+          "sellSize": 1188.324026,
+          "sellProceeds": 592.832267,
+          "buyN": 14,
+          "sellN": 11,
+          "net": 0.01597400000014204,
+          "avg": 0.18039752932662367,
+          "pnl": 378.47464100000013,
+          "finalValue": 0.01597400000014204
+        },
+        {
+          "asset": "32104456283101193356516083953938557619129919145460135422936120237315712158592",
+          "question": "Will the highest temperature in Hong Kong be 29°C on July 14?",
+          "band": "29°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 717.1,
+          "buyCost": 13.96629,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 717.1,
+          "avg": 0.019476070283084648,
+          "pnl": -13.96629,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": 364.5083510000001,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-austin-on-july-9-2026",
+      "city": "Austin",
+      "date": "July 9",
+      "buyU": 175.93259999999984,
+      "sellU": 381.24261,
+      "buyN": 96,
+      "sellN": 7,
+      "first": 1783622827,
+      "last": 1783648357,
+      "winner": {
+        "status": "error",
+        "winners": []
+      },
+      "outcomes": [
+        {
+          "asset": "96749603533744129891624039744775193107751596112365734457036111052272869902023",
+          "question": "Will the highest temperature in Austin be between 96-97°F on July 9?",
+          "band": "96-97°F",
+          "tokenOutcome": "Yes",
+          "buySize": 451.66,
+          "buyCost": 169.93122,
+          "sellSize": 451.66,
+          "sellProceeds": 379.31175,
+          "buyN": 3,
+          "sellN": 4,
+          "net": 0,
+          "avg": 0.37623703670902886,
+          "pnl": 209.38053000000002,
+          "finalValue": 0
+        },
+        {
+          "asset": "94148850358673828334456181428818885104333913920667500055801950530740351703134",
+          "question": "Will the highest temperature in Austin be between 94-95°F on July 9?",
+          "band": "94-95°F",
+          "tokenOutcome": "Yes",
+          "buySize": 564.1000000000007,
+          "buyCost": 3.0510299999999972,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 87,
+          "sellN": 0,
+          "net": 564.1000000000007,
+          "avg": 0.005408668675766696,
+          "pnl": -3.0510299999999972,
+          "finalValue": 0
+        },
+        {
+          "asset": "19331992788589204021488416041524970941889098700598063964125298723225916526944",
+          "question": "Will the highest temperature in Austin be between 100-101°F on July 9?",
+          "band": "100-101°F",
+          "tokenOutcome": "Yes",
+          "buySize": 215.07,
+          "buyCost": 2.9503499999999994,
+          "sellSize": 187.5,
+          "sellProceeds": 1.93086,
+          "buyN": 6,
+          "sellN": 3,
+          "net": 27.569999999999993,
+          "avg": 0.0137180917840703,
+          "pnl": -1.0194899999999993,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": 205.31001000000003,
+      "closed": false
+    },
+    {
+      "slug": "fifwc-esp-bel-2026-07-10-exact-score",
+      "city": "-",
+      "date": "-",
+      "buyU": 161.90676,
+      "sellU": 0,
+      "buyN": 2,
+      "sellN": 0,
+      "first": 1783692344,
+      "last": 1783692382,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "Exact Score: Spain 2 - 1 Belgium?"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "4814258142955625524359953204403102601157208440423395649365462906836414424044",
+          "question": "Exact Score: Spain 1 - 0 Belgium?",
+          "band": "Exact Score: Spain 1 - 0 Belgium?",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 1000,
+          "buyCost": 125.28,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 1000,
+          "avg": 0.12528,
+          "pnl": -125.28,
+          "finalValue": 0
+        },
+        {
+          "asset": "33198660246443949555231989143096643863314652872161793924629798643770772781071",
+          "question": "Exact Score: Spain 0 - 0 Belgium?",
+          "band": "Exact Score: Spain 0 - 0 Belgium?",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 499.99,
+          "buyCost": 36.62676,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 499.99,
+          "avg": 0.07325498509970199,
+          "pnl": -36.62676,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -161.90676,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-shenzhen-on-july-14-2026",
+      "city": "Shenzhen",
+      "date": "July 14",
+      "buyU": 160.04314,
+      "sellU": 0,
+      "buyN": 11,
+      "sellN": 0,
+      "first": 1783991012,
+      "last": 1784012032,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "29°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "90619555648751027912180907077137552202962798875929820311408158992310985924516",
+          "question": "Will the highest temperature in Shenzhen be 28°C on July 14?",
+          "band": "28°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 887.22,
+          "buyCost": 160.04314,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 11,
+          "sellN": 0,
+          "net": 887.22,
+          "avg": 0.1803872094858096,
+          "pnl": -160.04314,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -160.04314,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-miami-on-july-9-2026",
+      "city": "Miami",
+      "date": "July 9",
+      "buyU": 142.705749,
+      "sellU": 161.4885,
+      "buyN": 12,
+      "sellN": 8,
+      "first": 1783622410,
+      "last": 1783648393,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "90-91°F"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "10883912768592098667524498827300259543448965677138285668343101557490993110630",
+          "question": "Will the highest temperature in Miami be between 92-93°F on July 9?",
+          "band": "92-93°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 379.630538,
+          "buyCost": 98.26574,
+          "sellSize": 379.63,
+          "sellProceeds": 63.521029999999996,
+          "buyN": 5,
+          "sellN": 4,
+          "net": 0.0005380000000059226,
+          "avg": 0.25884572015120655,
+          "pnl": -34.74471,
+          "finalValue": 0
+        },
+        {
+          "asset": "71625332959047929991251327012040806334029760895933413719663793436872206444592",
+          "question": "Will the highest temperature in Miami be between 90-91°F on July 9?",
+          "band": "90-91°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 1,
+          "buySize": 110,
+          "buyCost": 41.93139,
+          "sellSize": 110,
+          "sellProceeds": 97.96746999999999,
+          "buyN": 1,
+          "sellN": 4,
+          "net": 0,
+          "avg": 0.38119445454545453,
+          "pnl": 56.03607999999999,
+          "finalValue": 0
+        },
+        {
+          "asset": "73113249074970894301084063989092031221272192499236859123577012940571784028085",
+          "question": "Will the highest temperature in Miami be between 94-95°F on July 9?",
+          "band": "94-95°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 247.52966600000002,
+          "buyCost": 2.508619,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 6,
+          "sellN": 0,
+          "net": 247.52966600000002,
+          "avg": 0.010134619581315153,
+          "pnl": -2.508619,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": 18.78275099999999,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-beijing-on-july-10-2026",
+      "city": "Beijing",
+      "date": "July 10",
+      "buyU": 103.22261,
+      "sellU": 0,
+      "buyN": 11,
+      "sellN": 0,
+      "first": 1783625005,
+      "last": 1783648708,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "27°C or below"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "41968553746442956644489381463889980754940349117929781907071052076614076958442",
+          "question": "Will the highest temperature in Beijing be 32°C on July 10?",
+          "band": "32°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 1367.25,
+          "buyCost": 30.30041,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 2,
+          "sellN": 0,
+          "net": 1367.25,
+          "avg": 0.022161572499542877,
+          "pnl": -30.30041,
+          "finalValue": 0
+        },
+        {
+          "asset": "8558793652850238734125671499189742012274438869252557156443757137990042642891",
+          "question": "Will the highest temperature in Beijing be 29°C on July 10?",
+          "band": "29°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 169.83,
+          "buyCost": 29.39931,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 2,
+          "sellN": 0,
+          "net": 169.83,
+          "avg": 0.17311022787493374,
+          "pnl": -29.39931,
+          "finalValue": 0
+        },
+        {
+          "asset": "52385387027905285791670127390056850219949285897945874193536103212584902889926",
+          "question": "Will the highest temperature in Beijing be 30°C on July 10?",
+          "band": "30°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 188.29000000000002,
+          "buyCost": 24.69461,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 2,
+          "sellN": 0,
+          "net": 188.29000000000002,
+          "avg": 0.13115199957512347,
+          "pnl": -24.69461,
+          "finalValue": 0
+        },
+        {
+          "asset": "75136041911770037614518978900437119861816245568108659030536379269111719987997",
+          "question": "Will the highest temperature in Beijing be 31°C on July 10?",
+          "band": "31°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 227.82999999999998,
+          "buyCost": 15.50065,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 2,
+          "sellN": 0,
+          "net": 227.82999999999998,
+          "avg": 0.06803603564060923,
+          "pnl": -15.50065,
+          "finalValue": 0
+        },
+        {
+          "asset": "43029846734677903345736890825283908641108703388077842033853269272005984696916",
+          "question": "Will the highest temperature in Beijing be 33°C on July 10?",
+          "band": "33°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 383.61,
+          "buyCost": 3.3276299999999996,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 3,
+          "sellN": 0,
+          "net": 383.61,
+          "avg": 0.008674513177445843,
+          "pnl": -3.3276299999999996,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -103.22261,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-nyc-on-july-10-2026",
+      "city": "New York City",
+      "date": "July 10",
+      "buyU": 101.86020699999996,
+      "sellU": 0,
+      "buyN": 66,
+      "sellN": 0,
+      "first": 1783653353,
+      "last": 1783690843,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "88-89°F"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "59419408647951976409280567122889815166496425768238806481125349798902464106240",
+          "question": "Will the highest temperature in New York City be between 86-87°F on July 10?",
+          "band": "86-87°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 200,
+          "buyCost": 51.875,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 200,
+          "avg": 0.259375,
+          "pnl": -51.875,
+          "finalValue": 0
+        },
+        {
+          "asset": "48179462559392192064413443675821380951806144474905581795315493142614543056289",
+          "question": "Will the highest temperature in New York City be between 82-83°F on July 10?",
+          "band": "82-83°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 1029.1399999999999,
+          "buyCost": 28.5578,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 2,
+          "sellN": 0,
+          "net": 1029.1399999999999,
+          "avg": 0.027749188642944598,
+          "pnl": -28.5578,
+          "finalValue": 0
+        },
+        {
+          "asset": "3770414072299799799821404427674517640094358429189595112233908856091001573038",
+          "question": "Will the highest temperature in New York City be between 84-85°F on July 10?",
+          "band": "84-85°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 264.567727,
+          "buyCost": 14.749300000000002,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 9,
+          "sellN": 0,
+          "net": 264.567727,
+          "avg": 0.055748674138172576,
+          "pnl": -14.749300000000002,
+          "finalValue": 0
+        },
+        {
+          "asset": "44513230294181435091560427318717216516781957622145151931830507342250836666453",
+          "question": "Will the highest temperature in New York City be between 80-81°F on July 10?",
+          "band": "80-81°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 1395.21925,
+          "buyCost": 6.678106999999995,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 54,
+          "sellN": 0,
+          "net": 1395.21925,
+          "avg": 0.004786421202259068,
+          "pnl": -6.678106999999995,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -101.860207,
+      "closed": true
+    },
+    {
+      "slug": "iran-military-action-against-a-gulf-state-onptptpt-20260708212328295",
+      "city": "-",
+      "date": "July 9",
+      "buyU": 89.997954,
+      "sellU": 139.993,
+      "buyN": 2,
+      "sellN": 3,
+      "first": 1783918301,
+      "last": 1783919171,
+      "winner": {
+        "status": "open",
+        "winners": []
+      },
+      "outcomes": [
+        {
+          "asset": "115147204977117737874154803841181012449146941275699745556479997448531136943728",
+          "question": "Iran military action against a Gulf State on July 9?",
+          "band": "Iran military action against a Gulf State on July 9?",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.9995,
+          "buySize": 199.995453,
+          "buyCost": 89.997954,
+          "sellSize": 199.99,
+          "sellProceeds": 139.993,
+          "buyN": 2,
+          "sellN": 3,
+          "net": 0.005452999999988606,
+          "avg": 0.450000000750017,
+          "pnl": 50.000496273500005,
+          "finalValue": 0.0054502734999886115
+        }
+      ],
+      "estimatedPnl": 50.000496273500005,
+      "closed": false
+    },
+    {
+      "slug": "toy-story-5-4th-weekend-box-office-20260708231025962",
+      "city": "-",
+      "date": "-",
+      "buyU": 88.12258,
+      "sellU": 72.13333,
+      "buyN": 1,
+      "sellN": 1,
+      "first": 1783921544,
+      "last": 1783924001,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "Will \"Toy Story 5\" 4th Weekend Box Office be between 19m and 21m?"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "28797183715600073716332589416506617663701185909635109043188553491097537780326",
+          "question": "Will \"Toy Story 5\" 4th Weekend Box Office be between 19m and 21m?",
+          "band": "Will \"Toy Story 5\" 4th Weekend Box Office be between 19m and 21m?",
+          "tokenOutcome": "Yes",
+          "settlePrice": 1,
+          "buySize": 190,
+          "buyCost": 88.12258,
+          "sellSize": 190,
+          "sellProceeds": 72.13333,
+          "buyN": 1,
+          "sellN": 1,
+          "net": 0,
+          "avg": 0.46380305263157895,
+          "pnl": -15.989249999999998,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -15.989249999999998,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-nyc-on-july-13-2026",
+      "city": "New York City",
+      "date": "July 13",
+      "buyU": 87.853,
+      "sellU": 82.64831,
+      "buyN": 8,
+      "sellN": 7,
+      "first": 1783921367,
+      "last": 1783961819,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "84-85°F"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "111358357411774604995568839824269989032323545693379588365752597275473590112979",
+          "question": "Will the highest temperature in New York City be between 82-83°F on July 13?",
+          "band": "82-83°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 524.5500000000001,
+          "buyCost": 55.48988000000001,
+          "sellSize": 327.03999999999996,
+          "sellProceeds": 61.46456,
+          "buyN": 5,
+          "sellN": 2,
+          "net": 197.5100000000001,
+          "avg": 0.10578568296635212,
+          "pnl": 5.974679999999992,
+          "finalValue": 0
+        },
+        {
+          "asset": "89751198486628569891423914095607322451644592930480391785076514294226067695432",
+          "question": "Will the highest temperature in New York City be between 88-89°F on July 13?",
+          "band": "88-89°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 400.02,
+          "buyCost": 27.07805,
+          "sellSize": 400.02,
+          "sellProceeds": 20.72387,
+          "buyN": 1,
+          "sellN": 2,
+          "net": 0,
+          "avg": 0.06769174041297936,
+          "pnl": -6.3541799999999995,
+          "finalValue": 0
+        },
+        {
+          "asset": "39820872152622492604402310946700195763984889228089612805211031837323593111866",
+          "question": "Will the highest temperature in New York City be between 80-81°F on July 13?",
+          "band": "80-81°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 767.47,
+          "buyCost": 5.285069999999999,
+          "sellSize": 482.04,
+          "sellProceeds": 0.45988,
+          "buyN": 2,
+          "sellN": 3,
+          "net": 285.43,
+          "avg": 0.006886353863994683,
+          "pnl": -4.825189999999999,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -5.2046900000000065,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-chicago-on-july-9-2026",
+      "city": "Chicago",
+      "date": "July 9",
+      "buyU": 86.16263099999998,
+      "sellU": 172.63691,
+      "buyN": 24,
+      "sellN": 3,
+      "first": 1783621333,
+      "last": 1783648376,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "86-87°F"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "44715662365491816539049816040391403662344562376550171618846350112716272047806",
+          "question": "Will the highest temperature in Chicago be between 86-87°F on July 9?",
+          "band": "86-87°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 1,
+          "buySize": 156.78,
+          "buyCost": 47.17713,
+          "sellSize": 156.78,
+          "sellProceeds": 156.61539,
+          "buyN": 6,
+          "sellN": 1,
+          "net": 0,
+          "avg": 0.3009129353233831,
+          "pnl": 109.43825999999999,
+          "finalValue": 0
+        },
+        {
+          "asset": "57882281583789327643501490652571622946375661039343553941206321618443771209075",
+          "question": "Will the highest temperature in Chicago be between 88-89°F on July 9?",
+          "band": "88-89°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 318.55682,
+          "buyCost": 22.394631,
+          "sellSize": 90,
+          "sellProceeds": 9.63245,
+          "buyN": 15,
+          "sellN": 1,
+          "net": 228.55682000000002,
+          "avg": 0.07030027170662992,
+          "pnl": -12.762181,
+          "finalValue": 0
+        },
+        {
+          "asset": "46899263640272250451646809736974950042252860752911647980904805797512681686487",
+          "question": "Will the highest temperature in Chicago be between 82-83°F on July 9?",
+          "band": "82-83°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 189.02,
+          "buyCost": 16.59087,
+          "sellSize": 167.78,
+          "sellProceeds": 6.38907,
+          "buyN": 3,
+          "sellN": 1,
+          "net": 21.24000000000001,
+          "avg": 0.08777309279441328,
+          "pnl": -10.201799999999999,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": 86.474279,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-nyc-on-july-15-2026",
+      "city": "New York City",
+      "date": "July 15",
+      "buyU": 78.65440000000001,
+      "sellU": 0,
+      "buyN": 2,
+      "sellN": 0,
+      "first": 1784046487,
+      "last": 1784054300,
+      "winner": {
+        "status": "open",
+        "winners": []
+      },
+      "outcomes": [
+        {
+          "asset": "72431217081016294769710303555532026919503731459195884439178186314083533020436",
+          "question": "Will the highest temperature in New York City be between 94-95°F on July 15?",
+          "band": "94-95°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.091,
+          "buySize": 459.92,
+          "buyCost": 39.41433,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 459.92,
+          "avg": 0.0856982301269786,
+          "pnl": 2.4383899999999983,
+          "finalValue": 41.85272
+        },
+        {
+          "asset": "106121766016609944525504683535053519220708708128183230648157876999499395581391",
+          "question": "Will the highest temperature in New York City be 93°F or below on July 15?",
+          "band": "93°F or below",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.1375,
+          "buySize": 761.9,
+          "buyCost": 39.24007,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 761.9,
+          "avg": 0.051502913768211055,
+          "pnl": 65.52118,
+          "finalValue": 104.76125
+        }
+      ],
+      "estimatedPnl": 67.95957,
+      "closed": false
+    },
+    {
+      "slug": "highest-temperature-in-warsaw-on-july-14-2026",
+      "city": "Warsaw",
+      "date": "July 14",
+      "buyU": 68.487683,
+      "sellU": 33.80896,
+      "buyN": 12,
+      "sellN": 8,
+      "first": 1783941331,
+      "last": 1783964272,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "27°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "34657011632344994786551998959066411372683520293179045502236628088417577051415",
+          "question": "Will the highest temperature in Warsaw be 23°C on July 14?",
+          "band": "23°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 861.48,
+          "buyCost": 25.14883,
+          "sellSize": 861.48,
+          "sellProceeds": 14.03108,
+          "buyN": 2,
+          "sellN": 2,
+          "net": 0,
+          "avg": 0.02919258717555834,
+          "pnl": -11.117750000000001,
+          "finalValue": 0
+        },
+        {
+          "asset": "66174444182079839953793877805932470596146045960469194972655813797052016276770",
+          "question": "Will the highest temperature in Warsaw be 24°C on July 14?",
+          "band": "24°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 262.97,
+          "buyCost": 23.3546,
+          "sellSize": 262.97,
+          "sellProceeds": 14.74317,
+          "buyN": 4,
+          "sellN": 2,
+          "net": 0,
+          "avg": 0.08881089097615698,
+          "pnl": -8.611430000000002,
+          "finalValue": 0
+        },
+        {
+          "asset": "27287064039432928520593267286533051891334136799800705811514742921286451563394",
+          "question": "Will the highest temperature in Warsaw be 21°C on July 14?",
+          "band": "21°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 916.8499999999999,
+          "buyCost": 14.2392,
+          "sellSize": 916.85,
+          "sellProceeds": 1.41148,
+          "buyN": 2,
+          "sellN": 2,
+          "net": -1.1368683772161603e-13,
+          "avg": 0.015530566613949939,
+          "pnl": -12.82772,
+          "finalValue": 0
+        },
+        {
+          "asset": "104684877825463287334729661375968501353509902704959424562913416717180047258809",
+          "question": "Will the highest temperature in Warsaw be 22°C on July 14?",
+          "band": "22°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 765.8983000000001,
+          "buyCost": 5.745053,
+          "sellSize": 765.89,
+          "sellProceeds": 3.6232300000000004,
+          "buyN": 4,
+          "sellN": 2,
+          "net": 0.00830000000007658,
+          "avg": 0.00750106508919004,
+          "pnl": -2.121823,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -34.678723000000005,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-shenzhen-on-july-10-2026",
+      "city": "Shenzhen",
+      "date": "July 10",
+      "buyU": 67.76842200000002,
+      "sellU": 5.096449999999999,
+      "buyN": 25,
+      "sellN": 4,
+      "first": 1783646293,
+      "last": 1783659688,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "33°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "51570982157241457089334686640494175069189338615869799125258123175938711774285",
+          "question": "Will the highest temperature in Shenzhen be 31°C on July 10?",
+          "band": "31°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 331.1,
+          "buyCost": 36.53382,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 331.1,
+          "avg": 0.11034074297795227,
+          "pnl": -36.53382,
+          "finalValue": 0
+        },
+        {
+          "asset": "2368849859371240702189448543745656846665901669372584553270031909809798995319",
+          "question": "Will the highest temperature in Shenzhen be 29°C on July 10?",
+          "band": "29°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 1556.13292,
+          "buyCost": 28.085422,
+          "sellSize": 1556.1299999999999,
+          "sellProceeds": 5.096449999999999,
+          "buyN": 23,
+          "sellN": 4,
+          "net": 0.00292000000013104,
+          "avg": 0.01804821531569424,
+          "pnl": -22.988972000000004,
+          "finalValue": 0
+        },
+        {
+          "asset": "55504190434283209048047767914215722464245760180839956856656092292806373511617",
+          "question": "Will the highest temperature in Shenzhen be 30°C on July 10?",
+          "band": "30°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 550,
+          "buyCost": 3.14918,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 550,
+          "avg": 0.0057257818181818175,
+          "pnl": -3.14918,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -62.671972000000004,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-seoul-on-july-13-2026",
+      "city": "Seoul",
+      "date": "July 13",
+      "buyU": 54.081720000000004,
+      "sellU": 0.65412,
+      "buyN": 5,
+      "sellN": 1,
+      "first": 1783915832,
+      "last": 1783917025,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "32°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "22692421198912774779687897384416401694910953086308762232561342014699068640091",
+          "question": "Will the highest temperature in Seoul be 31°C on July 13?",
+          "band": "31°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 441.74,
+          "buyCost": 54.081720000000004,
+          "sellSize": 441.74,
+          "sellProceeds": 0.65412,
+          "buyN": 5,
+          "sellN": 1,
+          "net": 0,
+          "avg": 0.12242884954950876,
+          "pnl": -53.427600000000005,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -53.427600000000005,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-amsterdam-on-july-13-2026",
+      "city": "Amsterdam",
+      "date": "July 13",
+      "buyU": 52.336648,
+      "sellU": 39.5802,
+      "buyN": 5,
+      "sellN": 1,
+      "first": 1783942576,
+      "last": 1783958888,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "25°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "60952610215412990870565486113110092690082601383115391798637487783733155640335",
+          "question": "Will the highest temperature in Amsterdam be 24°C or below on July 13?",
+          "band": "24°C or below",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 404.98735999999997,
+          "buyCost": 39.916647999999995,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 4,
+          "sellN": 0,
+          "net": 404.98735999999997,
+          "avg": 0.09856270082108241,
+          "pnl": -39.916647999999995,
+          "finalValue": 0
+        },
+        {
+          "asset": "102325916637378687415840697916367439526688806332215856173083353168991870295612",
+          "question": "Will the highest temperature in Amsterdam be 25°C on July 13?",
+          "band": "25°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 1,
+          "buySize": 40,
+          "buyCost": 12.42,
+          "sellSize": 40,
+          "sellProceeds": 39.5802,
+          "buyN": 1,
+          "sellN": 1,
+          "net": 0,
+          "avg": 0.3105,
+          "pnl": 27.160199999999996,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -12.756447999999999,
+      "closed": true
+    },
+    {
+      "slug": "fifwc-esp-bel-2026-07-10",
+      "city": "-",
+      "date": "-",
+      "buyU": 50.7914,
+      "sellU": 0,
+      "buyN": 1,
+      "sellN": 0,
+      "first": 1783692652,
+      "last": 1783692652,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "Will Spain win on 2026-07-10?"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "113258140039729603259288671364749723242703790462413008421390186262563698386140",
+          "question": "Will Belgium win on 2026-07-10?",
+          "band": "Will Belgium win on 2026-07-10?",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 300,
+          "buyCost": 50.7914,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 300,
+          "avg": 0.1693046666666667,
+          "pnl": -50.7914,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -50.7914,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-hong-kong-on-july-15-2026",
+      "city": "Hong Kong",
+      "date": "July 15",
+      "buyU": 48.02181,
+      "sellU": 0,
+      "buyN": 1,
+      "sellN": 0,
+      "first": 1784082091,
+      "last": 1784082091,
+      "winner": {
+        "status": "open",
+        "winners": []
+      },
+      "outcomes": [
+        {
+          "asset": "83644399871374077962709706550114371621641563823375838371867188922623744392406",
+          "question": "Will the highest temperature in Hong Kong be 28°C on July 15?",
+          "band": "28°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.575,
+          "buySize": 146.98,
+          "buyCost": 48.02181,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 146.98,
+          "avg": 0.3267234317594231,
+          "pnl": 36.49168999999999,
+          "finalValue": 84.5135
+        }
+      ],
+      "estimatedPnl": 36.49168999999999,
+      "closed": false
+    },
+    {
+      "slug": "highest-temperature-in-chicago-on-july-15-2026",
+      "city": "Chicago",
+      "date": "July 15",
+      "buyU": 47.76047,
+      "sellU": 0,
+      "buyN": 7,
+      "sellN": 0,
+      "first": 1784074280,
+      "last": 1784074951,
+      "winner": {
+        "status": "open",
+        "winners": []
+      },
+      "outcomes": [
+        {
+          "asset": "93516133037261273488999058685745305794195431095589707194657847289641150320342",
+          "question": "Will the highest temperature in Chicago be between 90-91°F on July 15?",
+          "band": "90-91°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.0355,
+          "buySize": 662.4399999999999,
+          "buyCost": 18.08007,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 3,
+          "sellN": 0,
+          "net": 662.4399999999999,
+          "avg": 0.027293143529980076,
+          "pnl": 5.436549999999997,
+          "finalValue": 23.516619999999996
+        },
+        {
+          "asset": "7224469483191021339198549325973843812718722438776916411306067141871135421026",
+          "question": "Will the highest temperature in Chicago be between 92-93°F on July 15?",
+          "band": "92-93°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.108,
+          "buySize": 206.16,
+          "buyCost": 15.05735,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 2,
+          "sellN": 0,
+          "net": 206.16,
+          "avg": 0.07303720411331005,
+          "pnl": 7.207930000000001,
+          "finalValue": 22.26528
+        },
+        {
+          "asset": "5916094645798826931821149193359930034916440321808656379092032631515670559153",
+          "question": "Will the highest temperature in Chicago be 89°F or below on July 15?",
+          "band": "89°F or below",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.0115,
+          "buySize": 842.25,
+          "buyCost": 14.623050000000001,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 2,
+          "sellN": 0,
+          "net": 842.25,
+          "avg": 0.017361887800534284,
+          "pnl": -4.937175000000002,
+          "finalValue": 9.685875
+        }
+      ],
+      "estimatedPnl": 7.707304999999996,
+      "closed": false
+    },
+    {
+      "slug": "highest-temperature-in-shenzhen-on-july-15-2026",
+      "city": "Shenzhen",
+      "date": "July 15",
+      "buyU": 47.357638,
+      "sellU": 0,
+      "buyN": 16,
+      "sellN": 0,
+      "first": 1784073992,
+      "last": 1784077072,
+      "winner": {
+        "status": "open",
+        "winners": []
+      },
+      "outcomes": [
+        {
+          "asset": "51192743028257133415410519726435910364248991609181845062069266354631970006391",
+          "question": "Will the highest temperature in Shenzhen be 27°C on July 15?",
+          "band": "27°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.1965,
+          "buySize": 280.02,
+          "buyCost": 30.71357,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 3,
+          "sellN": 0,
+          "net": 280.02,
+          "avg": 0.10968348689379331,
+          "pnl": 24.31036,
+          "finalValue": 55.02393
+        },
+        {
+          "asset": "108856618594768171669105667869229537415800326357896076370737771733360959992618",
+          "question": "Will the highest temperature in Shenzhen be 26°C on July 15?",
+          "band": "26°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.0005,
+          "buySize": 832.2034,
+          "buyCost": 16.644068,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 13,
+          "sellN": 0,
+          "net": 832.2034,
+          "avg": 0.02,
+          "pnl": -16.227966300000002,
+          "finalValue": 0.4161017
+        }
+      ],
+      "estimatedPnl": 8.082393699999997,
+      "closed": false
+    },
+    {
+      "slug": "highest-temperature-in-madrid-on-july-13-2026",
+      "city": "Madrid",
+      "date": "July 13",
+      "buyU": 47.23016499999999,
+      "sellU": 0,
+      "buyN": 13,
+      "sellN": 0,
+      "first": 1783941073,
+      "last": 1783954696,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "33°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "74437748190465519479900938930602207999017248501339660335332015522015820118983",
+          "question": "Will the highest temperature in Madrid be 32°C or below on July 13?",
+          "band": "32°C or below",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 335.911287,
+          "buyCost": 47.23016499999999,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 13,
+          "sellN": 0,
+          "net": 335.911287,
+          "avg": 0.14060309024388332,
+          "pnl": -47.23016499999999,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -47.23016499999999,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-seoul-on-july-15-2026",
+      "city": "Seoul",
+      "date": "July 15",
+      "buyU": 41.71069000000001,
+      "sellU": 0,
+      "buyN": 8,
+      "sellN": 0,
+      "first": 1784073406,
+      "last": 1784081210,
+      "winner": {
+        "status": "open",
+        "winners": []
+      },
+      "outcomes": [
+        {
+          "asset": "8200757218540402612577399684771726754456289218265255820838395720042941769787",
+          "question": "Will the highest temperature in Seoul be 26°C on July 15?",
+          "band": "26°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.232,
+          "buySize": 213.27,
+          "buyCost": 25.71517,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 213.27,
+          "avg": 0.12057565527265907,
+          "pnl": 23.763470000000005,
+          "finalValue": 49.478640000000006
+        },
+        {
+          "asset": "46604542089764788220726008131398729672863572351025234387242155329454548887505",
+          "question": "Will the highest temperature in Seoul be 25°C on July 15?",
+          "band": "25°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.0005,
+          "buySize": 612.182306,
+          "buyCost": 15.995520000000003,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 7,
+          "sellN": 0,
+          "net": 612.182306,
+          "avg": 0.026128687228016683,
+          "pnl": -15.689428847000002,
+          "finalValue": 0.306091153
+        }
+      ],
+      "estimatedPnl": 8.074041153000003,
+      "closed": false
+    },
+    {
+      "slug": "highest-temperature-in-london-on-july-13-2026",
+      "city": "London",
+      "date": "July 13",
+      "buyU": 40.901756,
+      "sellU": 0,
+      "buyN": 5,
+      "sellN": 0,
+      "first": 1783942073,
+      "last": 1783947815,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "26°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "36886695017792163126567045959790843114550239726319469164934635749386438769050",
+          "question": "Will the highest temperature in London be 24°C or below on July 13?",
+          "band": "24°C or below",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 334.57613299999997,
+          "buyCost": 40.901756,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 5,
+          "sellN": 0,
+          "net": 334.57613299999997,
+          "avg": 0.12224947318642122,
+          "pnl": -40.901756,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -40.901756,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-warsaw-on-july-13-2026",
+      "city": "Warsaw",
+      "date": "July 13",
+      "buyU": 39.529354,
+      "sellU": 3.10046,
+      "buyN": 6,
+      "sellN": 2,
+      "first": 1783943060,
+      "last": 1783964284,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "25°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "86836539853372435502977358560410596775113310930482825091152420906389216292152",
+          "question": "Will the highest temperature in Warsaw be 22°C on July 13?",
+          "band": "22°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 607.6339419999999,
+          "buyCost": 27.755224,
+          "sellSize": 327.63,
+          "sellProceeds": 2.89766,
+          "buyN": 5,
+          "sellN": 1,
+          "net": 280.00394199999994,
+          "avg": 0.0456775405084267,
+          "pnl": -24.857563999999996,
+          "finalValue": 0
+        },
+        {
+          "asset": "50490111693943599202864604165637911268127846664011640733605203794377488932565",
+          "question": "Will the highest temperature in Warsaw be 27°C on July 13?",
+          "band": "27°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 213.46,
+          "buyCost": 11.77413,
+          "sellSize": 213.46,
+          "sellProceeds": 0.2028,
+          "buyN": 1,
+          "sellN": 1,
+          "net": 0,
+          "avg": 0.05515848402511009,
+          "pnl": -11.57133,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -36.428894,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-wellington-on-july-14-2026",
+      "city": "Wellington",
+      "date": "July 14",
+      "buyU": 36.446381,
+      "sellU": 17.01133,
+      "buyN": 15,
+      "sellN": 2,
+      "first": 1783986194,
+      "last": 1784002111,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "15°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "59009191953139409536474397766931850771512474474013718624307603287007028093310",
+          "question": "Will the highest temperature in Wellington be 15°C on July 14?",
+          "band": "15°C",
+          "tokenOutcome": "No",
+          "settlePrice": 0,
+          "buySize": 258.995,
+          "buyCost": 19.73977,
+          "sellSize": 109.89,
+          "sellProceeds": 3.52762,
+          "buyN": 6,
+          "sellN": 1,
+          "net": 149.10500000000002,
+          "avg": 0.07621679955211491,
+          "pnl": -16.21215,
+          "finalValue": 0
+        },
+        {
+          "asset": "70759912823999773536131463800122209151672371675472242677133502220510847774252",
+          "question": "Will the highest temperature in Wellington be 16°C on July 14?",
+          "band": "16°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 205.94806599999998,
+          "buyCost": 16.706611000000002,
+          "sellSize": 117.41,
+          "sellProceeds": 13.48371,
+          "buyN": 9,
+          "sellN": 1,
+          "net": 88.53806599999999,
+          "avg": 0.0811205044285291,
+          "pnl": -3.222901000000002,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -19.435051,
+      "closed": true
+    },
+    {
+      "slug": "dota2-liquid-xtreme-2026-07-14",
+      "city": "-",
+      "date": "-",
+      "buyU": 31.086,
+      "sellU": 0,
+      "buyN": 1,
+      "sellN": 0,
+      "first": 1784042881,
+      "last": 1784042881,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "Game 1: Both Teams Beat Roshan?",
+          "Game 1: Both Teams Destroy Barracks?",
+          "Game 2: Ends in Daytime?",
+          "Game 2: Both Teams Beat Roshan?",
+          "Game 2: Both Teams Destroy Barracks?",
+          "Game 3: Ends in Daytime?"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "38404839370859900572663651821110620858010736415606391321540518400366572036926",
+          "question": "Dota 2: Team Liquid vs Xtreme Gaming (BO3) - Esports World Cup Survival",
+          "band": "Dota 2: Team Liquid vs Xtreme Gaming (BO3) - Esports World Cup Survival",
+          "tokenOutcome": "Xtreme Gaming",
+          "settlePrice": 0,
+          "buySize": 103.62,
+          "buyCost": 31.086,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 103.62,
+          "avg": 0.3,
+          "pnl": -31.086,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -31.086,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-hong-kong-on-july-10-2026",
+      "city": "Hong Kong",
+      "date": "July 10",
+      "buyU": 30.415850000000002,
+      "sellU": 23.936420000000002,
+      "buyN": 17,
+      "sellN": 3,
+      "first": 1783621139,
+      "last": 1783655090,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "33°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "50179021562962272945727364948256791624643752426047639860038208560925718193239",
+          "question": "Will the highest temperature in Hong Kong be 31°C on July 10?",
+          "band": "31°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 361.62,
+          "buyCost": 30.415850000000002,
+          "sellSize": 373.19,
+          "sellProceeds": 23.936420000000002,
+          "buyN": 17,
+          "sellN": 3,
+          "net": -11.569999999999993,
+          "avg": 0.08410997732426305,
+          "pnl": -6.479430000000001,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -6.479430000000001,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-wellington-on-july-10-2026",
+      "city": "Wellington",
+      "date": "July 10",
+      "buyU": 29.56396,
+      "sellU": 0,
+      "buyN": 1,
+      "sellN": 0,
+      "first": 1783628567,
+      "last": 1783628567,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "10°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "17453219396306856797081110742130697501896762650701070500662389934200707682103",
+          "question": "Will the highest temperature in Wellington be 9°C on July 10?",
+          "band": "9°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 250,
+          "buyCost": 29.56396,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 250,
+          "avg": 0.11825584,
+          "pnl": -29.56396,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -29.56396,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-houston-on-july-14-2026",
+      "city": "Houston",
+      "date": "July 14",
+      "buyU": 29.066570000000002,
+      "sellU": 0,
+      "buyN": 6,
+      "sellN": 0,
+      "first": 1784044052,
+      "last": 1784044114,
+      "winner": {
+        "status": "open",
+        "winners": []
+      },
+      "outcomes": [
+        {
+          "asset": "7049790618396214876680440354697142134387450622052794986775870561783887027594",
+          "question": "Will the highest temperature in Houston be between 78-79°F on July 14?",
+          "band": "78-79°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0.0005,
+          "buySize": 96.88856599999998,
+          "buyCost": 29.066570000000002,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 6,
+          "sellN": 0,
+          "net": 96.88856599999998,
+          "avg": 0.3000000020642271,
+          "pnl": -29.018125717000004,
+          "finalValue": 0.04844428299999999
+        }
+      ],
+      "estimatedPnl": -29.018125717000004,
+      "closed": false
+    },
+    {
+      "slug": "highest-temperature-in-helsinki-on-july-10-2026",
+      "city": "Helsinki",
+      "date": "July 10",
+      "buyU": 19.00609,
+      "sellU": 0,
+      "buyN": 2,
+      "sellN": 0,
+      "first": 1783700273,
+      "last": 1783700282,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "22°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "76889490026757707183472527669684136585579879180470165907756818720756891085172",
+          "question": "Will the highest temperature in Helsinki be 22°C on July 10?",
+          "band": "22°C",
+          "tokenOutcome": "No",
+          "settlePrice": 0,
+          "buySize": 978.83,
+          "buyCost": 9.51115,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 978.83,
+          "avg": 0.009716855838092417,
+          "pnl": -9.51115,
+          "finalValue": 0
+        },
+        {
+          "asset": "66674519306826729288736662117882177766139528020702218805855415176795918348478",
+          "question": "Will the highest temperature in Helsinki be 23°C on July 10?",
+          "band": "23°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 966.86,
+          "buyCost": 9.49494,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 966.86,
+          "avg": 0.009820387646608609,
+          "pnl": -9.49494,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -19.00609,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-denver-on-july-9-2026",
+      "city": "Denver",
+      "date": "July 9",
+      "buyU": 17.13322,
+      "sellU": 0.40702,
+      "buyN": 2,
+      "sellN": 1,
+      "first": 1783622627,
+      "last": 1783624504,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "90-91°F"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "112174705116808378902669140650043938503366002227867359918131364482328635187510",
+          "question": "Will the highest temperature in Denver be between 86-87°F on July 9?",
+          "band": "86-87°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 428.40999999999997,
+          "buyCost": 17.13322,
+          "sellSize": 428.41,
+          "sellProceeds": 0.40702,
+          "buyN": 2,
+          "sellN": 1,
+          "net": -5.684341886080802e-14,
+          "avg": 0.03999257720408021,
+          "pnl": -16.726200000000002,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -16.726200000000002,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-hong-kong-on-july-13-2026",
+      "city": "Hong Kong",
+      "date": "July 13",
+      "buyU": 16.97537,
+      "sellU": 33.35998,
+      "buyN": 1,
+      "sellN": 3,
+      "first": 1783918879,
+      "last": 1783920398,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "33°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "33390893986910054640162063718206481869270148589936106605879345533729780721029",
+          "question": "Will the highest temperature in Hong Kong be 34°C on July 13?",
+          "band": "34°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 128.44,
+          "buyCost": 16.97537,
+          "sellSize": 128.44,
+          "sellProceeds": 33.35998,
+          "buyN": 1,
+          "sellN": 3,
+          "net": 0,
+          "avg": 0.1321657583307381,
+          "pnl": 16.38461,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": 16.38461,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-tokyo-on-july-14-2026",
+      "city": "Tokyo",
+      "date": "July 14",
+      "buyU": 16.324184,
+      "sellU": 4.26706,
+      "buyN": 8,
+      "sellN": 1,
+      "first": 1783988125,
+      "last": 1783990900,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "34°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "113644673609242368187204132171959342654496289933905463067005912431894637617539",
+          "question": "Will the highest temperature in Tokyo be 31°C on July 14?",
+          "band": "31°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 239.541435,
+          "buyCost": 16.324184,
+          "sellSize": 219.61,
+          "sellProceeds": 4.26706,
+          "buyN": 8,
+          "sellN": 1,
+          "net": 19.931434999999993,
+          "avg": 0.0681476421814038,
+          "pnl": -12.057123999999998,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -12.057123999999998,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-helsinki-on-july-13-2026",
+      "city": "Helsinki",
+      "date": "July 13",
+      "buyU": 14.608842,
+      "sellU": 6.607600000000001,
+      "buyN": 4,
+      "sellN": 2,
+      "first": 1783923745,
+      "last": 1783948582,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "20°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "106909307513998223272196228867473175757923789217195591897003675518164569206643",
+          "question": "Will the highest temperature in Helsinki be 22°C on July 13?",
+          "band": "22°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 250,
+          "buyCost": 12.91546,
+          "sellSize": 250,
+          "sellProceeds": 4.6976,
+          "buyN": 2,
+          "sellN": 1,
+          "net": 0,
+          "avg": 0.05166184,
+          "pnl": -8.217859999999998,
+          "finalValue": 0
+        },
+        {
+          "asset": "65184338952185583309750996806653639611937011990961065695465618409242425340152",
+          "question": "Will the highest temperature in Helsinki be 21°C on July 13?",
+          "band": "21°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 169.3382,
+          "buyCost": 1.693382,
+          "sellSize": 20,
+          "sellProceeds": 1.91,
+          "buyN": 2,
+          "sellN": 1,
+          "net": 149.3382,
+          "avg": 0.01,
+          "pnl": 0.21661799999999998,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -8.001241999999998,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-shanghai-on-july-10-2026",
+      "city": "Shanghai",
+      "date": "July 10",
+      "buyU": 14.32662,
+      "sellU": 0,
+      "buyN": 1,
+      "sellN": 0,
+      "first": 1783648453,
+      "last": 1783648453,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "32°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "73100061656820505919829128101124796459054707563126061895441184124853063688084",
+          "question": "Will the highest temperature in Shanghai be 31°C on July 10?",
+          "band": "31°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 78,
+          "buyCost": 14.32662,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 78,
+          "avg": 0.18367461538461538,
+          "pnl": -14.32662,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -14.32662,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-paris-on-july-10-2026",
+      "city": "Paris",
+      "date": "July 10",
+      "buyU": 12.95527,
+      "sellU": 0,
+      "buyN": 5,
+      "sellN": 0,
+      "first": 1783697917,
+      "last": 1783700942,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "35°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "108673640298712286818808289175171337614922138055876498867562664167673318260207",
+          "question": "Will the highest temperature in Paris be 36°C on July 10?",
+          "band": "36°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 138.54,
+          "buyCost": 10.82444,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 4,
+          "sellN": 0,
+          "net": 138.54,
+          "avg": 0.07813223617727733,
+          "pnl": -10.82444,
+          "finalValue": 0
+        },
+        {
+          "asset": "53750037181557636087985674500419412935383056110111494790206812937303462983328",
+          "question": "Will the highest temperature in Paris be 35°C on July 10?",
+          "band": "35°C",
+          "tokenOutcome": "No",
+          "settlePrice": 0,
+          "buySize": 35,
+          "buyCost": 2.13083,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 35,
+          "avg": 0.060880857142857146,
+          "pnl": -2.13083,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -12.955269999999999,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-munich-on-july-13-2026",
+      "city": "Munich",
+      "date": "July 13",
+      "buyU": 12.62688,
+      "sellU": 0,
+      "buyN": 1,
+      "sellN": 0,
+      "first": 1783941259,
+      "last": 1783941259,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "31°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "60232564535938090875703608891209402950234449365569291366575627418307474005808",
+          "question": "Will the highest temperature in Munich be 29°C on July 13?",
+          "band": "29°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 157.23,
+          "buyCost": 12.62688,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 157.23,
+          "avg": 0.08030833810341538,
+          "pnl": -12.62688,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -12.62688,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-dallas-on-july-9-2026",
+      "city": "Dallas",
+      "date": "July 9",
+      "buyU": 12.07837,
+      "sellU": 12.22386,
+      "buyN": 1,
+      "sellN": 1,
+      "first": 1783624009,
+      "last": 1783626533,
+      "winner": {
+        "status": "error",
+        "winners": []
+      },
+      "outcomes": [
+        {
+          "asset": "48250822638535749721223770898837638388374046526781172304031431716740020676310",
+          "question": "Will the highest temperature in Dallas be between 98-99°F on July 9?",
+          "band": "98-99°F",
+          "tokenOutcome": "Yes",
+          "buySize": 144.34,
+          "buyCost": 12.07837,
+          "sellSize": 144.34,
+          "sellProceeds": 12.22386,
+          "buyN": 1,
+          "sellN": 1,
+          "net": 0,
+          "avg": 0.08367999168629624,
+          "pnl": 0.14549000000000056,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": 0.14549000000000056,
+      "closed": false
+    },
+    {
+      "slug": "lowest-temperature-in-nyc-on-july-10-2026",
+      "city": "New York City",
+      "date": "July 10",
+      "buyU": 9.40448,
+      "sellU": 0,
+      "buyN": 2,
+      "sellN": 0,
+      "first": 1783700777,
+      "last": 1783700792,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "76-77°F"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "81909523501438715147446043092852329878946282443099973223297385275527017126349",
+          "question": "Will the lowest temperature in New York City be between 74-75°F on July 10?",
+          "band": "74-75°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 51,
+          "buyCost": 6.9184,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 51,
+          "avg": 0.1356549019607843,
+          "pnl": -6.9184,
+          "finalValue": 0
+        },
+        {
+          "asset": "17033867363487390585814282579104423855862491193265903228133880116908635774386",
+          "question": "Will the lowest temperature in New York City be between 72-73°F on July 10?",
+          "band": "72-73°F",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 52.57,
+          "buyCost": 2.48608,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 52.57,
+          "avg": 0.04729085029484496,
+          "pnl": -2.48608,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -9.40448,
+      "closed": true
+    },
+    {
+      "slug": "itf-beck-mildren-2026-07-14",
+      "city": "-",
+      "date": "-",
+      "buyU": 8.32,
+      "sellU": 0,
+      "buyN": 1,
+      "sellN": 0,
+      "first": 1784002118,
+      "last": 1784002118,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "ITF Women Brisbane: Completed Match: Ava Beck vs Sarah Mildren"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "96605101272334569546840208101440141857872898152374578616856855619110202597531",
+          "question": "ITF Brisbane: Ava Beck vs Sarah Mildren",
+          "band": "ITF Brisbane: Ava Beck vs Sarah Mildren",
+          "tokenOutcome": "Sarah Mildren",
+          "settlePrice": 0,
+          "buySize": 16,
+          "buyCost": 8.32,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 16,
+          "avg": 0.52,
+          "pnl": -8.32,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -8.32,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-milan-on-july-13-2026",
+      "city": "Milan",
+      "date": "July 13",
+      "buyU": 6.750341000000001,
+      "sellU": 1.42968,
+      "buyN": 3,
+      "sellN": 1,
+      "first": 1783942405,
+      "last": 1783946855,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "32°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "32076650687406436123230188604241977498891658945393195523138914087444517300454",
+          "question": "Will the highest temperature in Milan be 31°C on July 13?",
+          "band": "31°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 104.7,
+          "buyCost": 4.84198,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 104.7,
+          "avg": 0.04624622731614136,
+          "pnl": -4.84198,
+          "finalValue": 0
+        },
+        {
+          "asset": "115308691731385778554297852075759748724324213430689298089849986672768689250804",
+          "question": "Will the highest temperature in Milan be 34°C on July 13?",
+          "band": "34°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 21.42111,
+          "buyCost": 1.908361,
+          "sellSize": 21.42,
+          "sellProceeds": 1.42968,
+          "buyN": 2,
+          "sellN": 1,
+          "net": 0.0011099999999970578,
+          "avg": 0.08908786706197765,
+          "pnl": -0.4786809999999999,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -5.320661,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-madrid-on-july-9-2026",
+      "city": "Madrid",
+      "date": "July 9",
+      "buyU": 5.179,
+      "sellU": 0,
+      "buyN": 3,
+      "sellN": 0,
+      "first": 1783612823,
+      "last": 1783612835,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "38°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "96439737662535265417387997892573520276419431615615244488938343080560856325685",
+          "question": "Will the highest temperature in Madrid be 39°C on July 9?",
+          "band": "39°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 18.5,
+          "buyCost": 3.515,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 2,
+          "sellN": 0,
+          "net": 18.5,
+          "avg": 0.19,
+          "pnl": -3.515,
+          "finalValue": 0
+        },
+        {
+          "asset": "4519508880349304488761327821908523423386243892431986044470527478147155201124",
+          "question": "Will the highest temperature in Madrid be 38°C on July 9?",
+          "band": "38°C",
+          "tokenOutcome": "No",
+          "settlePrice": 0,
+          "buySize": 8,
+          "buyCost": 1.664,
+          "sellSize": 0,
+          "sellProceeds": 0,
+          "buyN": 1,
+          "sellN": 0,
+          "net": 8,
+          "avg": 0.208,
+          "pnl": -1.664,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -5.179,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-busan-on-july-14-2026",
+      "city": "Busan",
+      "date": "July 14",
+      "buyU": 0.208333,
+      "sellU": 0.05894,
+      "buyN": 1,
+      "sellN": 1,
+      "first": 1783988786,
+      "last": 1783990627,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "30°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "61638417438849281164193606824102181946778320236333281976918138388945487035638",
+          "question": "Will the highest temperature in Busan be 29°C on July 14?",
+          "band": "29°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 0,
+          "buySize": 5.208325,
+          "buyCost": 0.208333,
+          "sellSize": 5.2,
+          "sellProceeds": 0.05894,
+          "buyN": 1,
+          "sellN": 1,
+          "net": 0.008325000000000138,
+          "avg": 0.039999999999999994,
+          "pnl": -0.149393,
+          "finalValue": 0
+        }
+      ],
+      "estimatedPnl": -0.149393,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-munich-on-july-9-2026",
+      "city": "Munich",
+      "date": "July 9",
+      "buyU": 0,
+      "sellU": 30.08425,
+      "buyN": 0,
+      "sellN": 2,
+      "first": 1783615796,
+      "last": 1783615810,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "26°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "23818423382404582881429070942455308237107776398327426411675635936266114962400",
+          "question": "Will the highest temperature in Munich be 26°C on July 9?",
+          "band": "26°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 1,
+          "buySize": 0,
+          "buyCost": 0,
+          "sellSize": 25.3,
+          "sellProceeds": 25.08949,
+          "buyN": 0,
+          "sellN": 1,
+          "net": -25.3,
+          "avg": 0,
+          "pnl": -0.2105099999999993,
+          "finalValue": -25.3
+        },
+        {
+          "asset": "19228610877110277969405877035453966508215760864349779152857579317472724048355",
+          "question": "Will the highest temperature in Munich be 25°C on July 9?",
+          "band": "25°C",
+          "tokenOutcome": "No",
+          "settlePrice": 1,
+          "buySize": 0,
+          "buyCost": 0,
+          "sellSize": 5,
+          "sellProceeds": 4.99476,
+          "buyN": 0,
+          "sellN": 1,
+          "net": -5,
+          "avg": 0,
+          "pnl": -0.005239999999999689,
+          "finalValue": -5
+        }
+      ],
+      "estimatedPnl": -0.215749999999999,
+      "closed": true
+    },
+    {
+      "slug": "highest-temperature-in-hong-kong-on-july-9-2026",
+      "city": "Hong Kong",
+      "date": "July 9",
+      "buyU": 0,
+      "sellU": 27.73224,
+      "buyN": 0,
+      "sellN": 2,
+      "first": 1783618445,
+      "last": 1783618936,
+      "winner": {
+        "status": "closed",
+        "winners": [
+          "31°C"
+        ]
+      },
+      "outcomes": [
+        {
+          "asset": "93016320602458963906937567399103494977078611421248619409670735923640166022414",
+          "question": "Will the highest temperature in Hong Kong be 31°C on July 9?",
+          "band": "31°C",
+          "tokenOutcome": "Yes",
+          "settlePrice": 1,
+          "buySize": 0,
+          "buyCost": 0,
+          "sellSize": 27.759999999999998,
+          "sellProceeds": 27.73224,
+          "buyN": 0,
+          "sellN": 2,
+          "net": -27.759999999999998,
+          "avg": 0,
+          "pnl": -0.02775999999999712,
+          "finalValue": -27.759999999999998
+        }
+      ],
+      "estimatedPnl": -0.02775999999999712,
+      "closed": true
+    }
+  ],
+  "city": {
+    "Seoul": {
+      "events": 4,
+      "closed": 3,
+      "buyU": 1116.450407,
+      "sellU": 1342.9407469999999,
+      "pnl": 275.66531399999997
+    },
+    "Shenzhen": {
+      "events": 4,
+      "closed": 3,
+      "buyU": 736.7088749999999,
+      "sellU": 368.71709000000004,
+      "pnl": -320.6341469999999
+    },
+    "New York City": {
+      "events": 6,
+      "closed": 4,
+      "buyU": 928.8778719999999,
+      "sellU": 811.1233480000001,
+      "pnl": -55.41892500000003
+    },
+    "Houston": {
+      "events": 2,
+      "closed": 1,
+      "buyU": 295.61756,
+      "sellU": 153.47382,
+      "pnl": -113.07717000000001
+    },
+    "Hong Kong": {
+      "events": 5,
+      "closed": 4,
+      "buyU": 323.75292,
+      "sellU": 677.860907,
+      "pnl": 374.38577100000015
+    },
+    "Austin": {
+      "events": 1,
+      "closed": 0,
+      "buyU": 175.93259999999984,
+      "sellU": 381.24261,
+      "pnl": 0
+    },
+    "-": {
+      "events": 6,
+      "closed": 5,
+      "buyU": 430.224694,
+      "sellU": 212.12633,
+      "pnl": -268.09341
+    },
+    "Miami": {
+      "events": 1,
+      "closed": 1,
+      "buyU": 142.705749,
+      "sellU": 161.4885,
+      "pnl": 18.78275099999999
+    },
+    "Beijing": {
+      "events": 1,
+      "closed": 1,
+      "buyU": 103.22261,
+      "sellU": 0,
+      "pnl": -103.22261
+    },
+    "Chicago": {
+      "events": 2,
+      "closed": 1,
+      "buyU": 133.92310099999997,
+      "sellU": 172.63691,
+      "pnl": 86.474279
+    },
+    "Warsaw": {
+      "events": 2,
+      "closed": 2,
+      "buyU": 108.017037,
+      "sellU": 36.90942,
+      "pnl": -71.107617
+    },
+    "Amsterdam": {
+      "events": 1,
+      "closed": 1,
+      "buyU": 52.336648,
+      "sellU": 39.5802,
+      "pnl": -12.756447999999999
+    },
+    "Madrid": {
+      "events": 2,
+      "closed": 2,
+      "buyU": 52.409164999999994,
+      "sellU": 0,
+      "pnl": -52.409164999999994
+    },
+    "London": {
+      "events": 1,
+      "closed": 1,
+      "buyU": 40.901756,
+      "sellU": 0,
+      "pnl": -40.901756
+    },
+    "Wellington": {
+      "events": 2,
+      "closed": 2,
+      "buyU": 66.01034100000001,
+      "sellU": 17.01133,
+      "pnl": -48.999011
+    },
+    "Helsinki": {
+      "events": 2,
+      "closed": 2,
+      "buyU": 33.614931999999996,
+      "sellU": 6.607600000000001,
+      "pnl": -27.007331999999998
+    },
+    "Denver": {
+      "events": 1,
+      "closed": 1,
+      "buyU": 17.13322,
+      "sellU": 0.40702,
+      "pnl": -16.726200000000002
+    },
+    "Tokyo": {
+      "events": 1,
+      "closed": 1,
+      "buyU": 16.324184,
+      "sellU": 4.26706,
+      "pnl": -12.057123999999998
+    },
+    "Shanghai": {
+      "events": 1,
+      "closed": 1,
+      "buyU": 14.32662,
+      "sellU": 0,
+      "pnl": -14.32662
+    },
+    "Paris": {
+      "events": 1,
+      "closed": 1,
+      "buyU": 12.95527,
+      "sellU": 0,
+      "pnl": -12.955269999999999
+    },
+    "Munich": {
+      "events": 2,
+      "closed": 2,
+      "buyU": 12.62688,
+      "sellU": 30.08425,
+      "pnl": -12.84263
+    },
+    "Dallas": {
+      "events": 1,
+      "closed": 0,
+      "buyU": 12.07837,
+      "sellU": 12.22386,
+      "pnl": 0
+    },
+    "Milan": {
+      "events": 1,
+      "closed": 1,
+      "buyU": 6.750341000000001,
+      "sellU": 1.42968,
+      "pnl": -5.320661
+    },
+    "Busan": {
+      "events": 1,
+      "closed": 1,
+      "buyU": 0.208333,
+      "sellU": 0.05894,
+      "pnl": -0.149393
+    }
+  },
+  "eventErrors": []
+}

@@ -1,9 +1,12 @@
 pub mod autocopy;
 pub mod discovery;
+pub mod employee_stats;
+pub mod leaderboard_recruitment;
 pub mod model;
 pub mod monitor;
 pub mod polymarket;
 pub mod ports;
 pub mod profile;
+pub mod recruitment;
 pub mod scoring;
 pub mod telegram;

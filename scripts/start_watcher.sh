@@ -21,7 +21,7 @@ exec "$APP_HOME/smart-wallet-discovery" watch \
   --employee '0xf54f8f4c925a8b8b445a4a6ec93012c6fb4e3374:edcrfvtgbujmik:CULTURE:twitter|x|post|tweet|album|movie|celebrity:180' \
   --employee '0xb2a3623364c33561d8312e1edb79eb941c798510:aekghas:POLITICS:trump|biden|election|senate|house|president|china:120' \
   --employee '0x5d0f03cf1243a3e21262d6cf844795afd9fff0ad:EB99999:POLITICS:trump|biden|election|senate|house|president|china:120' \
-  --employee '0x6011655c4afb76f36dd1b08a137a1ba73466b31e:HighTempTation:WEATHER:weather|temperature|hurricane|storm|rain|snow:60' \
+  --employee '0x1bf71e6bc7aecd80e302e016c2d47f398aba40c0:0x1BF71e6bc7aEcd80e302e016C2d47F398aba40C0-1776545507643:WEATHER:weather|temperature:30:1' \
   --employee '0xb19a7dc9f616c4270d5170a59a36d30de3ae3808:CHANCEHAT23:CULTURE:twitter|x|post|tweet|album|movie|celebrity:180' \
   --no-weatherhk-auto-copy \
   --poll-seconds 10 \

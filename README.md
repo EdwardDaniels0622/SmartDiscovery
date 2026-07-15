@@ -72,6 +72,8 @@ cargo test
 cargo run
 cargo run -- discover
 cargo run -- scan-employees --top 10
+cargo run -- recruit-employees --top 10 --trade-pages 5
+cargo run -- scan-domain-employees --domain WEATHER --leaderboard-depth 500 --wallet-limit 500
 ```
 
 Useful discovery flags:
@@ -86,6 +88,57 @@ cargo run -- discover --time-period ALL --max-current-loss 100000
 ```
 
 The simplified discovery command pulls public Polymarket leaderboard entries, samples closed positions and current positions, and picks one wallet per category by default. The default leaderboard period is `MONTH`, because all-time leaders can be washed after a bad recent run. It marks candidates as `HIRE` only when they pass the rough employee policy: enough closed markets, positive sampled PnL and ROI, controlled drawdown, recent activity, no recent cold streak, positive recent-window performance, and no large current/open loss. By default the recent window is 30 days, with at least 3 recent closed positions, non-negative recent PnL, non-negative recent ROI, at least 45% recent win rate, current/open loss below $50,000, and current/open loss ratio below 20%. API requests use `http://127.0.0.1:7890` as the default proxy.
+
+## Tape-Based Employee Recruitment
+
+`scan-employees` is the old leaderboard-first recruiter. The newer `recruit-employees` command starts from global `/trades` tape instead: it looks for BUYs that were copyable at entry, then checks whether later same-outcome tape moved in the buyer's favor. Repeated good trades are aggregated back into wallet + domain leads, then wallet-health vetting checks closed positions, recent PnL, current/open loss, two-sided footprints, and the recruitment reject list before anything is printed as a ready-to-watch employee spec.
+
+```bash
+cargo run -- recruit-employees --top 10 --trade-pages 5
+cargo run -- recruit-employees --domains WEATHER,TECH --trade-pages 10
+cargo run -- recruit-employees --min-tape-move 0.02 --min-candidate-trades 3
+cargo run -- recruit-employees --max-current-loss 2500 --reject-wallets 0xabc,0xdef
+scripts/recruit_employees_v2.sh --domains WEATHER
+```
+
+For scheduled recruitment, run the hourly scanner and daily summary:
+
+```bash
+scripts/recruit_employees_hourly.sh
+scripts/recruitment_daily_summary.sh
+```
+
+The hourly scanner saves JSON reports under `logs/recruitment/` and writes a combined `logs/recruitment/recruitment-summary.md`. Rejected leads are kept in JSON under `rejected_candidates`, and the summary file shows recent wallet-health rejections so old false positives do not look like hires. By default the summary only selects candidates that include `wallet_health`, meaning old tape-only reports are treated as diagnostics unless `--allow-unvetted` is passed. For local background collection, install `launchd/com.smartwallet.recruitment.hourly.plist` so launchd runs the hourly scanner silently. Codex should only keep a daily reminder that reads the combined summary file, instead of posting every hourly scan.
+
+See `docs/employee_recruitment_v2.md` for the requirements and scoring rationale.
+
+## Rotating Leaderboard Recruitment
+
+The current employee search returns to a leaderboard-first approach, but it does not assume that the first few ranks are copyable. `scan-domain-employees` merges `DAY`, `WEEK`, `MONTH`, and `ALL` leaderboards, paginates as far as rank 1000, and then deeply evaluates a configurable number of unique wallets.
+
+The first rotation contains seven short-cycle domains:
+
+```text
+WEATHER, SPORTS, CRYPTO, FINANCE, ECONOMICS, TECH, MENTIONS
+```
+
+`POLITICS` is kept outside the first rotation because many political markets settle over weeks or months. `MENTIONS` is used instead of broad `CULTURE`, because recurring word/phrase markets more often settle daily or weekly.
+
+The deep filter records total-wallet and domain-only PnL for 1/7/14 days. One-day PnL may be negative, while both 7-day and 14-day total and domain PnL must be positive. It also checks domain profit share, 14-day domain ROI and sample size, top-five profit concentration, profit earned from entries at 80c or above, and unresolved active-position loss. Redeemable positions are excluded from active risk.
+
+For `CRYPTO`, ordinary employee metrics exclude 5-, 10-, and 15-minute markets. Detection uses explicit duration labels and actual title time ranges such as `3:30AM-3:45AM`. The report records the excluded position, profit, and invested-capital shares separately. Profitable ultra-fast wallets appear only under `Ultra-Fast Observation Only`; they are not employees until entry timing and 30/60-second delayed-copy performance are validated.
+
+Run one domain manually:
+
+```bash
+cargo run -- scan-domain-employees --domain WEATHER --leaderboard-depth 500 --wallet-limit 500
+```
+
+Run the daily rotation. The first successful run starts with `WEATHER`, then advances through the seven-domain list. JSON snapshots and one append-only Markdown report are written under `logs/employee-discovery/`.
+
+```bash
+scripts/scan_employee_domains_daily.sh
+```
 
 If the default Data API endpoint or proxy should be changed, override them with:
 
@@ -143,6 +196,51 @@ The `profiles` command summarizes how an employee tends to make money and manage
 
 `watch` now loads the same profiles at startup by default and adds a copy-trade score, alert level, strategy summary, reasons, and cautions to each Telegram/stdout alert. Disable this with `--no-profiles` if you need the old lightweight watcher behavior.
 
+## Cached Employee Deep Inspection
+
+Use `employee-stats` when a candidate wallet needs a full 14-day review. The first refresh paginates Polymarket activity, trades, closed positions, and current positions, then stores the raw dataset and report in local SQLite. Later `show` calls are cache-only and do not call the API.
+
+Deep-inspect a new address. `--domain` and `--keywords` are optional; when omitted, the primary domain is inferred and marked as inferred in the report.
+
+```bash
+scripts/employee_deep_check.sh refresh 0xabc... --format compact-json
+
+cargo run -- employee-stats refresh \
+  --wallet 0xabc... \
+  --domain WEATHER \
+  --keywords 'weather|temperature|hurricane|storm' \
+  --format compact-json
+```
+
+Read the cached conclusion without network access:
+
+```bash
+scripts/employee_deep_check.sh show 0xabc...
+cargo run -- employee-stats show --wallet 0xabc...
+```
+
+Refresh only current positions, or rebuild all metrics from cached raw data:
+
+```bash
+cargo run -- employee-stats refresh --wallet 0xabc... --only positions
+cargo run -- employee-stats rebuild --wallet 0xabc...
+```
+
+The report separates whole-wallet, primary-domain, other-domain, unclassified, and specialty performance. The first specialty rule is `WORLD_CUP`, matching `fifwc-*`, `world-cup`, and `World Cup` markets. It includes fill and action counts, trade-size percentiles, settled and mark-to-market win rates, realized/unrealized/combined PnL, ROI, profit factor, drawdown, profit concentration, high-price entry dependence, suspected market making, current open losses, and stale losing positions. Every output shows the latest trade, latest settlement, position-check time, and history-completeness status.
+
+For resolved Polymarket binary positions, the report guards against `realizedPnl=0` hiding a win/loss: when reported PnL is effectively zero but `curPrice` is resolved to `1` or `0`, it imputes PnL from `(curPrice - avgPrice) * shares`. This keeps cached rebuilds from undercounting World Cup-style resolved positions.
+
+Local state is stored under `logs/employee-stats/` by default:
+
+```text
+employee-stats.sqlite3
+<wallet>/latest.json
+<wallet>/latest.md
+<wallet>/snapshots/<timestamp>.json
+```
+
+See [docs/employee_stats_execution_plan.md](docs/employee_stats_execution_plan.md) for metric definitions and acceptance criteria.
+
 ## WeatherHK Small Auto-Copy MVP
 
 The first auto-copy module is intentionally narrow: it only targets the `WeatherHK` wallet in `WEATHER` markets. It follows the small high-frequency behavior we discussed:
@@ -180,27 +278,30 @@ POLYMARKET_FUNDER_ADDRESS=
 POLYMARKET_SIGNATURE_TYPE=2
 POLYMARKET_CHAIN_ID=137
 POLYMARKET_CLOB_HOST=https://clob.polymarket.com
+POLYMARKET_EXECUTOR_RETRIES=2
+POLYMARKET_EXECUTOR_RETRY_BACKOFF_SECONDS=0.4
+POLYMARKET_FORCE_SELL_FLOOR_PRICE=0.001
 ```
 
 `.env` is ignored by git. The watcher loads it at startup and passes those variables to the external executor command. Shell environment variables still win if the same key is already set. Use `SMART_WALLET_ENV_FILE=/path/to/file` to load a different env file.
 
-The WeatherHK auto-copy caps can also live in `.env` via keys such as `WEATHERHK_AUTO_COPY_ENABLED`, `WEATHERHK_AUTO_COPY_MODE`, `WEATHERHK_AUTO_COPY_EXEC`, `WEATHERHK_MAX_MARKET_EXPOSURE_USD`, `WEATHERHK_MAX_DAILY_SPEND_USD`, `WEATHERHK_MAX_CHASE_PCT`, and `WEATHERHK_MAX_CHASE_DELTA`. Price chasing is percentage-first, with the delta value used as an absolute cap. CLI flags override these defaults when provided.
+The WeatherHK auto-copy caps can also live in `.env` via keys such as `WEATHERHK_AUTO_COPY_ENABLED`, `WEATHERHK_AUTO_COPY_MODE`, `WEATHERHK_AUTO_COPY_EXEC`, `WEATHERHK_MAX_MARKET_EXPOSURE_USD`, `WEATHERHK_MAX_DAILY_SPEND_USD`, `WEATHERHK_MAX_CHASE_PCT`, and `WEATHERHK_MAX_CHASE_DELTA`. Direct FOK buys use the percentage chase limit only; passive BUY prices still use the configured absolute delta cap to protect edge. CLI flags override these defaults when provided.
 
 Dry-run the WeatherHK logic without placing orders:
 
 ```bash
 cargo run -- watch \
-  --employee '0x488c725253fc21c7a9ca812030dc2f6343f98c1c:WeatherHK:WEATHER:weather|temperature|hurricane|storm|rain|snow:10:1' \
+  --employee '0x488c725253fc21c7a9ca812030dc2f6343f98c1c:WeatherHK:WEATHER:weather|temperature|hurricane|storm|rain|snow:1:1' \
   --weatherhk-auto-copy \
   --weatherhk-auto-copy-mode dry-run \
-  --poll-seconds 10
+  --poll-seconds 1
 ```
 
 Live mode delegates trading to an external executor command. The watcher sends a JSON request on stdin and expects a small JSON result on stdout:
 
 ```bash
 cargo run -- watch \
-  --employee '0x488c725253fc21c7a9ca812030dc2f6343f98c1c:WeatherHK:WEATHER:weather|temperature|hurricane|storm|rain|snow:10:1' \
+  --employee '0x488c725253fc21c7a9ca812030dc2f6343f98c1c:WeatherHK:WEATHER:weather|temperature|hurricane|storm|rain|snow:1:1' \
   --weatherhk-auto-copy \
   --weatherhk-auto-copy-mode live-external \
   --weatherhk-auto-copy-exec './scripts/polymarket_executor.sh' \
@@ -216,7 +317,8 @@ cargo run -- watch \
   --weatherhk-skip-buy-price-at-or-above 0.98 \
   --weatherhk-skip-buy-price-at-or-below 0.005 \
   --weatherhk-min-sell-sync-notional 1 \
-  --weatherhk-passive-ttl 0
+  --weatherhk-passive-ttl 0 \
+  --poll-seconds 1
 ```
 
 For a BUY request, the external executor should:
@@ -226,15 +328,17 @@ For a BUY request, the external executor should:
 3. Otherwise place a passive limit buy at `passive_limit_price`.
 4. Return `filled`, `pending`, `skipped`, or `failed`.
 
-For WeatherHK, `take_enabled` is normally true for small-copy mode. If the current best ask is cheaper than or equal to the direct chase limit, the follower should buy instead of skipping a better price. If the ask is above the direct limit or unavailable, the executor places a passive post-only buy at the passive limit.
+For WeatherHK, `take_enabled` is normally true for small-copy mode. If the current best ask is cheaper than or equal to the percentage-based direct chase limit, the follower should buy instead of skipping a reachable price. If the ask is above the direct limit or unavailable, the executor places a passive post-only buy at the passive limit, where the absolute delta cap still applies.
 
-WeatherHK BUYs below `WEATHERHK_MIN_BUY_SOURCE_NOTIONAL_USD` are skipped by default. BUYs at or above `WEATHERHK_SKIP_BUY_PRICE_AT_OR_ABOVE` are skipped by default. This avoids copying very high probability / very low edge trades, such as 98c-99c entries where the remaining payout is too thin for a follower. BUYs at or below `WEATHERHK_SKIP_BUY_PRICE_AT_OR_BELOW` are also skipped to avoid near-zero tail-risk or stale-maker-noise entries; the default is 0.5c.
+WeatherHK BUYs below `WEATHERHK_MIN_BUY_SOURCE_NOTIONAL_USD` are skipped by default. BUYs above `WEATHERHK_SKIP_BUY_PRICE_AT_OR_ABOVE` are skipped by default. This avoids copying very high probability / very low edge trades, such as 98c-99c entries where the remaining payout is too thin for a follower; exactly 98c is not skipped by this rule. Low-price BUY filtering is disabled by default with `WEATHERHK_SKIP_BUY_PRICE_AT_OR_BELOW=0`; sub-1c source trades may still execute at the exchange's minimum supported order price, so market/exposure caps remain important.
 
-WeatherHK SELLs below `WEATHERHK_MIN_SELL_SYNC_NOTIONAL_USD` are treated as dust for position selling, but still cancel matching pending BUY orders first.
+Any WeatherHK SELL for the same market/outcome cancels matching pending BUY orders first and, if we hold a tracked position, triggers market-exit selling for that outcome regardless of the source SELL notional. `WEATHERHK_MIN_SELL_SYNC_NOTIONAL_USD` is retained only for backward-compatible configs and should be `0`.
 
-Set `WEATHERHK_PASSIVE_TTL_SECONDS=0` to keep passive BUY orders open until a WeatherHK sell, source-position reconciliation, or another explicit risk event cancels them. Routine pending syncs do not send Telegram messages; only fills, cancels, failures, and partial-fill progress are reported.
+Set `WEATHERHK_PASSIVE_TTL_SECONDS=0` to keep passive BUY orders open until a WeatherHK sell, source-position reconciliation, or another explicit risk event cancels them. Source-position reconciliation also clears our tracked position when WeatherHK no longer holds that outcome. Routine pending syncs do not send Telegram messages; only fills, cancels, failures, and partial-fill progress are reported.
 
-For a SELL request, it should sell the requested shares at or above `min_sell_price`. For `cancel` and `sync`, it should cancel or report the state of a prior pending order.
+For a forced WeatherHK SELL request, the executor should exit immediately with a FAK market sell and no `min_sell_price`/slippage guard; partial fills are acceptable and the remainder is cancelled. `POLYMARKET_FORCE_SELL_FLOOR_PRICE` defaults to `0.001` so forced exits can hit sub-cent bids when WeatherHK exits at extreme low prices. For `cancel` and `sync`, it should cancel or report the state of a prior pending order.
+
+The external executor retries transient CLOB/network failures such as `Request exception`, SSL timeout, and connection reset. It does not retry deterministic rejects such as geoblock, insufficient balance/allowance, minimum-size failures, or unavailable matching liquidity.
 
 Example executor response:
 
