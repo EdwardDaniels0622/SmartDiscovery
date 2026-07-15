@@ -6,6 +6,7 @@ cd "$APP_HOME"
 
 export WEATHERHK_SOURCE_WALLET="0xf421705cbe3dd07db21ddd4a61eb8cce9386efce"
 export WEATHERHK_SOURCE_NAME="OlympusHive"
+export WEATHERHK_AUTO_COPY_MODE="dry-run"
 export WEATHERHK_STATE_PATH="logs/weatherf421_autocopy_state.json"
 export WEATHERHK_STRATEGY_CONFIG_PATH="config/autocopy_event_basket_strategy.json"
 export WEATHERHK_SPECIALTY_KEYWORDS="weather,temperature,precipitation,hurricane,typhoon,cyclone,storm,rain,snow,wind"
