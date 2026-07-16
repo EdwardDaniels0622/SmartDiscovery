@@ -4887,6 +4887,9 @@ impl AutoCopyEngine {
         let market_url = market_url(trade);
         let status = execution.status.label().to_owned();
         let copy_price = match action {
+            "BUY" if execution.status == ExecutionStatus::DryRun => Some(
+                price_with_pct_upside(source_price, self.config.max_chase_pct).min(limit_price),
+            ),
             "BUY" => execution
                 .filled_price
                 .or(execution.order_price)
@@ -4895,7 +4898,7 @@ impl AutoCopyEngine {
             "SELL" => execution.filled_price.or(execution.order_price),
             _ => execution.filled_price.or(execution.order_price),
         };
-        let reason = match action {
+        let mut reason = match action {
             "BUY" => {
                 let take_enabled = buy_take_enabled.unwrap_or(self.config.buy_take_enabled);
                 let sizing = sizing_reason.map(str::to_owned).unwrap_or_else(|| {
@@ -4960,6 +4963,15 @@ impl AutoCopyEngine {
             }),
             _ => "-".to_owned(),
         };
+        if action == "BUY" && execution.status == ExecutionStatus::DryRun {
+            if let Some(price) = copy_price {
+                reason.push_str(&format!(
+                    "；纸面记录: 未查询实时盘口，暂按基础 +{:.1}% 溢价入场 {:.2}c 记录。",
+                    self.config.max_chase_pct * 100.0,
+                    price * 100.0
+                ));
+            }
+        }
         let action_text = report_action_label(action, execution.status);
         let source_name = self.config.source_name.as_str();
         let mut text = format!(
@@ -8381,9 +8393,30 @@ mod tests {
             .find(|report| report.action == "BUY")
             .expect("expected below-guard buy");
 
-        assert_near(buy.copy_price.expect("expected passive limit"), 0.89);
+        assert_near(buy.copy_price.expect("expected dry-run take limit"), 0.90);
         assert!(buy.reason.contains("直接追价上限 90.00c"));
         assert!(!buy.reason.contains("高价谨慎模式"));
+    }
+
+    #[test]
+    fn dry_run_buy_records_direct_take_limit_not_passive_limit() {
+        let mut engine = test_engine();
+        let employee = test_employee();
+        let reports = engine.handle_trade(
+            &employee,
+            &test_trade("BUY", "weather-market", "asset-08", 0.08, 25.0, 100),
+        );
+        let buy = reports
+            .iter()
+            .find(|report| report.action == "BUY")
+            .expect("expected dry-run buy");
+
+        assert_eq!(buy.status, "dry-run");
+        assert_near(buy.copy_price.expect("expected direct take limit"), 0.092);
+        assert!(buy.reason.contains("直接追价上限 16.00c"));
+        assert!(buy.reason.contains("挂单 8.40c"));
+        assert!(buy.reason.contains("纸面记录"));
+        assert!(buy.reason.contains("入场 9.20c"));
     }
 
     #[test]
