@@ -2005,6 +2005,10 @@ impl AutoCopyEngine {
         }
         self.state
             .remember_processed_source_trade(source_key.clone());
+        if self.is_expired_weather_market_trade(trade, now) {
+            self.persist(&mut reports);
+            return reports;
+        }
         let event_time = trade.timestamp.unwrap_or(now);
         self.state
             .prune_source_memory(event_time, self.source_memory_retention_seconds());
@@ -2668,6 +2672,18 @@ impl AutoCopyEngine {
             .blocked_position_keys
             .iter()
             .any(|blocked| blocked.eq_ignore_ascii_case(key))
+    }
+
+    fn is_expired_weather_market_trade(&self, trade: &UserTrade, now: u64) -> bool {
+        let today = shanghai_date_yyyy_mm_dd(now);
+        self.is_expired_weather_market_trade_for_today(trade, &today)
+    }
+
+    fn is_expired_weather_market_trade_for_today(&self, trade: &UserTrade, today: &str) -> bool {
+        if !self.config.domain.eq_ignore_ascii_case("WEATHER") {
+            return false;
+        }
+        weather_market_date_before_today(trade, today)
     }
 
     fn handle_buy(&mut self, trade: &UserTrade, now: u64, event_time: u64) -> Vec<AutoCopyReport> {
@@ -7643,6 +7659,98 @@ fn matches_specialty_keywords(keywords: &[String], haystack: &str) -> bool {
         .any(|keyword| haystack.contains(&keyword.to_lowercase()))
 }
 
+fn weather_market_date_before_today(trade: &UserTrade, today: &str) -> bool {
+    let fallback_year = today
+        .get(..4)
+        .and_then(|year| year.parse::<i32>().ok())
+        .unwrap_or(1970);
+    weather_market_date_yyyy_mm_dd(trade, fallback_year)
+        .is_some_and(|market_date| market_date.as_str() < today)
+}
+
+fn weather_market_date_yyyy_mm_dd(trade: &UserTrade, fallback_year: i32) -> Option<String> {
+    [
+        trade.event_slug.as_deref(),
+        trade.slug.as_deref(),
+        trade.title.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|text| parse_month_day_market_date(text, fallback_year))
+}
+
+fn parse_month_day_market_date(text: &str, fallback_year: i32) -> Option<String> {
+    let normalized = text.to_ascii_lowercase();
+    let tokens = normalized
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+
+    for (index, token) in tokens.iter().enumerate() {
+        let Some(month) = english_month_number(token) else {
+            continue;
+        };
+        let day = tokens
+            .get(index + 1)
+            .and_then(|token| parse_day_token(token))?;
+        let year = tokens
+            .get(index + 2)
+            .and_then(|token| parse_year_token(token))
+            .unwrap_or(fallback_year);
+        if valid_month_day(month, day) {
+            return Some(format!("{year:04}-{month:02}-{day:02}"));
+        }
+    }
+
+    None
+}
+
+fn english_month_number(token: &str) -> Option<u32> {
+    match token {
+        "jan" | "january" => Some(1),
+        "feb" | "february" => Some(2),
+        "mar" | "march" => Some(3),
+        "apr" | "april" => Some(4),
+        "may" => Some(5),
+        "jun" | "june" => Some(6),
+        "jul" | "july" => Some(7),
+        "aug" | "august" => Some(8),
+        "sep" | "sept" | "september" => Some(9),
+        "oct" | "october" => Some(10),
+        "nov" | "november" => Some(11),
+        "dec" | "december" => Some(12),
+        _ => None,
+    }
+}
+
+fn parse_day_token(token: &str) -> Option<u32> {
+    let trimmed = token
+        .trim_end_matches("st")
+        .trim_end_matches("nd")
+        .trim_end_matches("rd")
+        .trim_end_matches("th");
+    let day = trimmed.parse::<u32>().ok()?;
+    (1..=31).contains(&day).then_some(day)
+}
+
+fn parse_year_token(token: &str) -> Option<i32> {
+    if token.len() != 4 {
+        return None;
+    }
+    let year = token.parse::<i32>().ok()?;
+    (1970..=2200).contains(&year).then_some(year)
+}
+
+fn valid_month_day(month: u32, day: u32) -> bool {
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => 29,
+        _ => return false,
+    };
+    day <= max_day
+}
+
 fn position_key(trade: &UserTrade) -> String {
     format!("{}:{}", trade.condition_id, trade.asset)
 }
@@ -8057,6 +8165,22 @@ fn now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or_default()
+}
+
+fn shanghai_date_yyyy_mm_dd(now_secs: u64) -> String {
+    let days = now_secs.saturating_add(8 * 3_600) / 86_400;
+    let z = days as i64 + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
 }
 
 #[cfg(test)]
@@ -8944,6 +9068,41 @@ mod tests {
         assert_near(engine.effective_buy_chase_pct(0.20), 0.5);
         assert_near(engine.effective_buy_chase_pct(0.40), 0.15);
         assert_near(engine.effective_buy_chase_pct(0.95), 0.0);
+    }
+
+    #[test]
+    fn weather_market_date_filter_detects_expired_calendar_market() {
+        let mut trade = test_trade("BUY", "weather-market", "asset-old", 0.08, 2.0, 100);
+        trade.event_slug = Some("highest-temperature-in-shenzhen-on-july-15-2026".to_owned());
+        trade.slug = Some("highest-temperature-in-shenzhen-on-july-15-2026-27c".to_owned());
+        trade.title =
+            Some("Will the highest temperature in Shenzhen be 27°C on July 15?".to_owned());
+
+        assert!(weather_market_date_before_today(&trade, "2026-07-17"));
+        assert!(!weather_market_date_before_today(&trade, "2026-07-15"));
+
+        trade.event_slug = None;
+        trade.slug = None;
+        assert!(weather_market_date_before_today(&trade, "2026-07-17"));
+    }
+
+    #[test]
+    fn expired_weather_activity_is_silently_ignored_before_ledgers() {
+        let mut engine = test_engine_with_event_strategy();
+        let employee = test_employee();
+        let mut trade = test_trade("BUY", "weather-market", "asset-expired", 0.08, 2.0, 100);
+        trade.event_slug = Some("highest-temperature-in-shenzhen-on-january-1-1970".to_owned());
+        trade.slug = Some("highest-temperature-in-shenzhen-on-january-1-1970-27c".to_owned());
+        trade.title =
+            Some("Will the highest temperature in Shenzhen be 27°C on January 1?".to_owned());
+
+        let reports = engine.handle_trade(&employee, &trade);
+
+        assert!(reports.is_empty());
+        assert_eq!(engine.state.processed_source_trades.len(), 1);
+        assert!(engine.state.source_buy_targets.is_empty());
+        assert!(engine.state.source_event_baskets.is_empty());
+        assert!(engine.state.source_outcomes.is_empty());
     }
 
     #[test]
@@ -10630,9 +10789,11 @@ mod tests {
             size: Some(notional / price),
             price: Some(price),
             timestamp: Some(timestamp),
-            title: Some("Will the highest temperature in Hong Kong be 32°C on June 3?".to_owned()),
-            slug: Some("highest-temperature-in-hong-kong-on-june-3-2026".to_owned()),
-            event_slug: Some("highest-temperature-in-hong-kong-on-june-3-2026".to_owned()),
+            title: Some(
+                "Will the highest temperature in Hong Kong be 32°C on December 31?".to_owned(),
+            ),
+            slug: Some("highest-temperature-in-hong-kong-on-december-31-2099".to_owned()),
+            event_slug: Some("highest-temperature-in-hong-kong-on-december-31-2099".to_owned()),
             outcome: Some(asset.to_owned()),
             outcome_index: None,
             name: Some("WeatherHK".to_owned()),
