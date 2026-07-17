@@ -1,5 +1,6 @@
 use crate::{monitor::WatchedEmployee, polymarket::UserTrade};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{
     collections::HashMap,
     env, fmt, fs,
@@ -38,6 +39,11 @@ const LOCK_PROFIT_SOURCE_PRICE: f64 = 0.99;
 const LOCK_PROFIT_MIN_SELL_PRICE: f64 = 0.998;
 const SMALL_SELL_PASSIVE_FRACTION_THRESHOLD: f64 = 0.20;
 const SMALL_SELL_PASSIVE_DISCOUNT_PCT: f64 = 0.15;
+const DEFAULT_MARKET_STATUS_CACHE_SECONDS: u64 = 60;
+const MARKET_STATUS_CONNECT_TIMEOUT_SECONDS: u64 = 2;
+const MARKET_STATUS_MAX_TIME_SECONDS: u64 = 5;
+const DEFAULT_GAMMA_API_BASE: &str = "https://gamma-api.polymarket.com";
+const DEFAULT_PROXY_URL: &str = "http://127.0.0.1:7890";
 const MAX_PENDING_SYNCS_PER_TICK: usize = 2;
 const MIN_TRACKED_ACTUAL_BALANCE_SHARES: f64 = 0.01;
 const SOURCE_RECONCILE_ACTION_COOLDOWN_SECONDS: u64 = 21_600;
@@ -438,6 +444,8 @@ pub struct AutoCopyConfig {
     pub source_reentry_alert_buy_usd: f64,
     pub small_sell_passive_fraction_threshold: f64,
     pub small_sell_passive_discount_pct: f64,
+    pub market_status_check_enabled: bool,
+    pub market_status_cache_seconds: u64,
 }
 
 impl AutoCopyConfig {
@@ -538,6 +546,11 @@ impl AutoCopyConfig {
                 "WEATHERHK_SMALL_SELL_PASSIVE_DISCOUNT_PCT",
                 SMALL_SELL_PASSIVE_DISCOUNT_PCT,
             ),
+            market_status_check_enabled: env_bool("WEATHERHK_MARKET_STATUS_CHECK_ENABLED", true),
+            market_status_cache_seconds: env_u64(
+                "WEATHERHK_MARKET_STATUS_CACHE_SECONDS",
+                DEFAULT_MARKET_STATUS_CACHE_SECONDS,
+            ),
         }
     }
 
@@ -637,6 +650,9 @@ impl AutoCopyConfig {
             return Err(
                 "WeatherHK small-sell passive discount pct must be between 0 and 0.95".to_owned(),
             );
+        }
+        if self.market_status_cache_seconds > 86_400 {
+            return Err("WeatherHK market status cache seconds must be <= 86400".to_owned());
         }
         self.strategy.validate()?;
 
@@ -1035,6 +1051,21 @@ impl Drop for GlobalStateLock {
 pub struct AutoCopyEngine {
     config: AutoCopyConfig,
     state: AutoCopyState,
+    market_status_cache: Vec<MarketStatusCacheEntry>,
+}
+
+#[derive(Debug, Clone)]
+struct MarketStatusCacheEntry {
+    cache_key: String,
+    observed_at_secs: u64,
+    status: MarketTradeStatus,
+}
+
+#[derive(Debug, Clone)]
+enum MarketTradeStatus {
+    Tradeable,
+    NotTradeable(String),
+    Unknown(String),
 }
 
 impl AutoCopyEngine {
@@ -1042,7 +1073,11 @@ impl AutoCopyEngine {
         let mut state = AutoCopyState::load(&config.state_path)?;
         state.reset_day_if_needed(now_secs());
 
-        Ok(Self { config, state })
+        Ok(Self {
+            config,
+            state,
+            market_status_cache: Vec::new(),
+        })
     }
 
     pub fn config(&self) -> &AutoCopyConfig {
@@ -2005,7 +2040,7 @@ impl AutoCopyEngine {
         }
         self.state
             .remember_processed_source_trade(source_key.clone());
-        if self.is_expired_weather_market_trade(trade, now) {
+        if self.should_skip_untradeable_weather_market(trade, now) {
             self.persist(&mut reports);
             return reports;
         }
@@ -2674,16 +2709,79 @@ impl AutoCopyEngine {
             .any(|blocked| blocked.eq_ignore_ascii_case(key))
     }
 
-    fn is_expired_weather_market_trade(&self, trade: &UserTrade, now: u64) -> bool {
+    fn should_skip_untradeable_weather_market(&mut self, trade: &UserTrade, now: u64) -> bool {
         let today = shanghai_date_yyyy_mm_dd(now);
-        self.is_expired_weather_market_trade_for_today(trade, &today)
+        self.should_skip_untradeable_weather_market_for_today(trade, &today, now)
     }
 
-    fn is_expired_weather_market_trade_for_today(&self, trade: &UserTrade, today: &str) -> bool {
+    fn should_skip_untradeable_weather_market_for_today(
+        &mut self,
+        trade: &UserTrade,
+        today: &str,
+        now: u64,
+    ) -> bool {
         if !self.config.domain.eq_ignore_ascii_case("WEATHER") {
             return false;
         }
-        weather_market_date_before_today(trade, today)
+
+        if !weather_market_date_before_today(trade, today) {
+            return false;
+        }
+
+        if self.config.market_status_check_enabled {
+            match self.cached_market_trade_status(trade, now) {
+                MarketTradeStatus::Tradeable => return false,
+                MarketTradeStatus::NotTradeable(reason) => {
+                    let _ = reason;
+                    return true;
+                }
+                MarketTradeStatus::Unknown(_) => {}
+            }
+        }
+
+        true
+    }
+
+    fn cached_market_trade_status(&mut self, trade: &UserTrade, now: u64) -> MarketTradeStatus {
+        let Some(cache_key) = market_status_cache_key(trade) else {
+            return MarketTradeStatus::Unknown("缺少 market/cache key".to_owned());
+        };
+
+        if let Some(entry) = self
+            .market_status_cache
+            .iter()
+            .find(|entry| {
+                entry.cache_key == cache_key
+                    && now.saturating_sub(entry.observed_at_secs)
+                        <= self.config.market_status_cache_seconds
+            })
+            .cloned()
+        {
+            return entry.status;
+        }
+
+        let status = fetch_gamma_market_trade_status(trade);
+        if let Some(entry) = self
+            .market_status_cache
+            .iter_mut()
+            .find(|entry| entry.cache_key == cache_key)
+        {
+            entry.observed_at_secs = now;
+            entry.status = status.clone();
+        } else {
+            self.market_status_cache.push(MarketStatusCacheEntry {
+                cache_key,
+                observed_at_secs: now,
+                status: status.clone(),
+            });
+        }
+
+        if self.market_status_cache.len() > 500 {
+            let excess = self.market_status_cache.len() - 500;
+            self.market_status_cache.drain(0..excess);
+        }
+
+        status
     }
 
     fn handle_buy(&mut self, trade: &UserTrade, now: u64, event_time: u64) -> Vec<AutoCopyReport> {
@@ -7659,6 +7757,327 @@ fn matches_specialty_keywords(keywords: &[String], haystack: &str) -> bool {
         .any(|keyword| haystack.contains(&keyword.to_lowercase()))
 }
 
+fn market_status_cache_key(trade: &UserTrade) -> Option<String> {
+    let condition_id = trade.condition_id.trim();
+    if !condition_id.is_empty() {
+        return Some(format!("condition:{condition_id}"));
+    }
+    event_slug_for_trade(trade).map(|slug| format!("slug:{slug}"))
+}
+
+fn fetch_gamma_market_trade_status(trade: &UserTrade) -> MarketTradeStatus {
+    let mut errors = Vec::new();
+    if let Some(event_slug) = trade
+        .event_slug
+        .as_deref()
+        .map(str::trim)
+        .filter(|slug| !slug.is_empty())
+    {
+        match fetch_gamma_event_by_slug(event_slug) {
+            Ok(payload) => return trade_status_from_gamma_event(&payload, trade),
+            Err(error) => errors.push(format!("event {event_slug}: {error}")),
+        }
+    }
+
+    if let Some(slug) = trade
+        .slug
+        .as_deref()
+        .map(str::trim)
+        .filter(|slug| !slug.is_empty())
+    {
+        match fetch_gamma_market_by_slug(slug) {
+            Ok(Some(payload)) => return trade_status_from_market_payload(&payload),
+            Ok(None) => errors.push(format!("market {slug}: not found")),
+            Err(error) => errors.push(format!("market {slug}: {error}")),
+        }
+    }
+
+    if errors.is_empty() {
+        MarketTradeStatus::Unknown("缺少 event_slug/slug，无法查询市场状态".to_owned())
+    } else {
+        MarketTradeStatus::Unknown(errors.join("; "))
+    }
+}
+
+fn fetch_gamma_event_by_slug(slug: &str) -> Result<Value, String> {
+    let base = env_string("POLYMARKET_GAMMA_API_BASE")
+        .unwrap_or_else(|| DEFAULT_GAMMA_API_BASE.to_owned());
+    let url = format!(
+        "{}/events/slug/{}",
+        base.trim_end_matches('/'),
+        url_encode_path_segment(slug)
+    );
+    curl_json_value(&url, &[])
+}
+
+fn fetch_gamma_market_by_slug(slug: &str) -> Result<Option<Value>, String> {
+    let base = env_string("POLYMARKET_GAMMA_API_BASE")
+        .unwrap_or_else(|| DEFAULT_GAMMA_API_BASE.to_owned());
+    let url = format!("{}/markets", base.trim_end_matches('/'));
+    let payload = curl_json_value(&url, &[("slug", slug.to_owned())])?;
+    if let Some(items) = payload.as_array() {
+        return Ok(items
+            .iter()
+            .find(|item| string_field(item, &["slug"]).as_deref() == Some(slug))
+            .cloned());
+    }
+    for key in ["markets", "data"] {
+        if let Some(items) = payload.get(key).and_then(Value::as_array) {
+            return Ok(items
+                .iter()
+                .find(|item| string_field(item, &["slug"]).as_deref() == Some(slug))
+                .cloned());
+        }
+    }
+    Ok(None)
+}
+
+fn curl_json_value(url: &str, query: &[(&str, String)]) -> Result<Value, String> {
+    let mut command = Command::new("curl");
+    command.args([
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--location",
+        "--connect-timeout",
+        &MARKET_STATUS_CONNECT_TIMEOUT_SECONDS.to_string(),
+        "--max-time",
+        &MARKET_STATUS_MAX_TIME_SECONDS.to_string(),
+        "--get",
+        url,
+    ]);
+
+    if let Some(proxy_url) = env_string("POLYMARKET_PROXY_URL")
+        .and_then(normalize_optional_proxy_url)
+        .or_else(|| Some(DEFAULT_PROXY_URL.to_owned()))
+    {
+        command.args(["--proxy", &proxy_url]);
+    }
+
+    for (key, value) in query {
+        command.args(["--data-urlencode", &format!("{key}={value}")]);
+    }
+
+    let output = command
+        .output()
+        .map_err(|error| format!("failed to run curl: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "curl exited with code {:?}: {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    serde_json::from_slice::<Value>(&output.stdout)
+        .map_err(|error| format!("failed to parse JSON: {error}"))
+}
+
+fn trade_status_from_gamma_event(payload: &Value, trade: &UserTrade) -> MarketTradeStatus {
+    let event_status = trade_status_from_status_payload(payload, "event");
+    if matches!(event_status, MarketTradeStatus::NotTradeable(_)) {
+        return event_status;
+    }
+
+    let matching_market = gamma_event_markets(payload)
+        .into_iter()
+        .find(|market| gamma_market_matches_trade(market, trade));
+
+    if let Some(market) = matching_market {
+        let market_status = trade_status_from_market_payload(market);
+        if matches!(market_status, MarketTradeStatus::Unknown(_)) {
+            return event_status;
+        }
+        return market_status;
+    }
+
+    if gamma_event_markets(payload).is_empty() {
+        return event_status;
+    }
+
+    match event_status {
+        MarketTradeStatus::Tradeable => MarketTradeStatus::Unknown(
+            "event is tradeable but no exact condition/slug/asset market match".to_owned(),
+        ),
+        MarketTradeStatus::Unknown(reason) => MarketTradeStatus::Unknown(format!(
+            "{reason}; event markets found but no exact condition/slug match"
+        )),
+        MarketTradeStatus::NotTradeable(_) => event_status,
+    }
+}
+
+fn trade_status_from_market_payload(payload: &Value) -> MarketTradeStatus {
+    trade_status_from_status_payload(payload, "market")
+}
+
+fn trade_status_from_status_payload(payload: &Value, label: &str) -> MarketTradeStatus {
+    if bool_field(payload, &["closed"]).unwrap_or(false) {
+        return MarketTradeStatus::NotTradeable(format!("{label} closed=true"));
+    }
+    if bool_field(payload, &["archived"]).unwrap_or(false) {
+        return MarketTradeStatus::NotTradeable(format!("{label} archived=true"));
+    }
+    if bool_field(payload, &["active"]) == Some(false) {
+        return MarketTradeStatus::NotTradeable(format!("{label} active=false"));
+    }
+    if bool_field(
+        payload,
+        &[
+            "accepting_orders",
+            "acceptingOrders",
+            "acceptingorders",
+            "accepting_order",
+        ],
+    ) == Some(false)
+    {
+        return MarketTradeStatus::NotTradeable(format!("{label} accepting_orders=false"));
+    }
+    if bool_field(
+        payload,
+        &["enable_order_book", "enableOrderBook", "enableOrderbook"],
+    ) == Some(false)
+    {
+        return MarketTradeStatus::NotTradeable(format!("{label} enable_order_book=false"));
+    }
+
+    if bool_field(
+        payload,
+        &["accepting_orders", "acceptingOrders", "acceptingorders"],
+    ) == Some(true)
+        || bool_field(payload, &["active"]) == Some(true)
+        || bool_field(
+            payload,
+            &["enable_order_book", "enableOrderBook", "enableOrderbook"],
+        ) == Some(true)
+    {
+        return MarketTradeStatus::Tradeable;
+    }
+
+    MarketTradeStatus::Unknown(format!("{label} lacks decisive status fields"))
+}
+
+fn gamma_event_markets(payload: &Value) -> Vec<&Value> {
+    payload
+        .get("markets")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().collect())
+        .unwrap_or_default()
+}
+
+fn gamma_market_matches_trade(market: &Value, trade: &UserTrade) -> bool {
+    let condition_id = trade.condition_id.trim();
+    if !condition_id.is_empty()
+        && string_field(market, &["conditionId", "condition_id"])
+            .is_some_and(|value| value.eq_ignore_ascii_case(condition_id))
+    {
+        return true;
+    }
+    if let Some(slug) = trade
+        .slug
+        .as_deref()
+        .map(str::trim)
+        .filter(|slug| !slug.is_empty())
+    {
+        if string_field(market, &["slug"]).is_some_and(|value| value.eq_ignore_ascii_case(slug)) {
+            return true;
+        }
+    }
+    market_payload_mentions_asset(market, &trade.asset)
+}
+
+fn market_payload_mentions_asset(market: &Value, asset: &str) -> bool {
+    let asset = asset.trim();
+    if asset.is_empty() {
+        return false;
+    }
+    for key in ["clobTokenIds", "clob_token_ids", "tokenIds", "token_ids"] {
+        if jsonish_string_array_field(market, key)
+            .iter()
+            .any(|value| value.trim() == asset)
+        {
+            return true;
+        }
+    }
+    market
+        .get("tokens")
+        .and_then(Value::as_array)
+        .is_some_and(|tokens| {
+            tokens.iter().any(|token| {
+                string_field(token, &["token_id", "tokenId", "id"])
+                    .is_some_and(|value| value == asset)
+            })
+        })
+}
+
+fn bool_field(value: &Value, keys: &[&str]) -> Option<bool> {
+    for key in keys {
+        if let Some(raw) = value.get(*key) {
+            if let Some(value) = raw.as_bool() {
+                return Some(value);
+            }
+            if let Some(text) = raw.as_str() {
+                if text.eq_ignore_ascii_case("true") {
+                    return Some(true);
+                }
+                if text.eq_ignore_ascii_case("false") {
+                    return Some(false);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn string_field(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        value.get(*key).and_then(|raw| {
+            raw.as_str()
+                .map(str::to_owned)
+                .or_else(|| raw.as_u64().map(|number| number.to_string()))
+        })
+    })
+}
+
+fn jsonish_string_array_field(value: &Value, key: &str) -> Vec<String> {
+    let Some(raw) = value.get(key) else {
+        return Vec::new();
+    };
+    if let Some(items) = raw.as_array() {
+        return items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_owned))
+            .collect();
+    }
+    raw.as_str()
+        .and_then(|text| serde_json::from_str::<Vec<String>>(text).ok())
+        .unwrap_or_default()
+}
+
+fn normalize_optional_proxy_url(proxy_url: String) -> Option<String> {
+    let proxy_url = proxy_url.trim();
+    if proxy_url.is_empty()
+        || proxy_url.eq_ignore_ascii_case("none")
+        || proxy_url.eq_ignore_ascii_case("off")
+        || proxy_url.eq_ignore_ascii_case("direct")
+    {
+        None
+    } else {
+        Some(proxy_url.to_owned())
+    }
+}
+
+fn url_encode_path_segment(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                encoded.push(byte as char)
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
 fn weather_market_date_before_today(trade: &UserTrade, today: &str) -> bool {
     let fallback_year = today
         .get(..4)
@@ -9084,6 +9503,118 @@ mod tests {
         trade.event_slug = None;
         trade.slug = None;
         assert!(weather_market_date_before_today(&trade, "2026-07-17"));
+    }
+
+    #[test]
+    fn gamma_market_status_detects_closed_or_non_accepting_market() {
+        let trade = test_trade("BUY", "condition-1", "asset-1", 0.08, 2.0, 100);
+        let closed_event = serde_json::json!({
+            "active": true,
+            "closed": true,
+            "markets": [{
+                "conditionId": "condition-1",
+                "active": true,
+                "closed": false,
+                "acceptingOrders": true
+            }]
+        });
+        assert!(matches!(
+            trade_status_from_gamma_event(&closed_event, &trade),
+            MarketTradeStatus::NotTradeable(_)
+        ));
+
+        let non_accepting_market = serde_json::json!({
+            "active": true,
+            "closed": false,
+            "markets": [{
+                "conditionId": "condition-1",
+                "active": true,
+                "closed": false,
+                "acceptingOrders": false
+            }]
+        });
+        assert!(matches!(
+            trade_status_from_gamma_event(&non_accepting_market, &trade),
+            MarketTradeStatus::NotTradeable(_)
+        ));
+
+        let open_market = serde_json::json!({
+            "active": true,
+            "closed": false,
+            "archived": false,
+            "markets": [{
+                "conditionId": "condition-1",
+                "active": true,
+                "closed": false,
+                "acceptingOrders": true,
+                "enableOrderBook": true
+            }]
+        });
+        assert!(matches!(
+            trade_status_from_gamma_event(&open_market, &trade),
+            MarketTradeStatus::Tradeable
+        ));
+    }
+
+    #[test]
+    fn tradeable_status_allows_calendar_expired_weather_market() {
+        let mut engine = test_engine_with_event_strategy();
+        engine.config.market_status_check_enabled = true;
+        let mut trade = test_trade("BUY", "condition-open", "asset-open", 0.08, 2.0, 100);
+        trade.event_slug = Some("highest-temperature-in-nyc-on-july-16-2026".to_owned());
+        trade.slug = Some("highest-temperature-in-nyc-on-july-16-2026-82-83f".to_owned());
+        engine.market_status_cache.push(MarketStatusCacheEntry {
+            cache_key: market_status_cache_key(&trade).expect("cache key"),
+            observed_at_secs: 1000,
+            status: MarketTradeStatus::Tradeable,
+        });
+
+        assert!(!engine.should_skip_untradeable_weather_market_for_today(
+            &trade,
+            "2026-07-17",
+            1000
+        ));
+    }
+
+    #[test]
+    fn future_weather_market_does_not_use_stale_non_tradeable_cache() {
+        let mut engine = test_engine_with_event_strategy();
+        engine.config.market_status_check_enabled = true;
+        let trade = test_trade("BUY", "condition-future", "asset-future", 0.08, 2.0, 100);
+        engine.market_status_cache.push(MarketStatusCacheEntry {
+            cache_key: market_status_cache_key(&trade).expect("cache key"),
+            observed_at_secs: 1000,
+            status: MarketTradeStatus::NotTradeable("stale closed status".to_owned()),
+        });
+
+        assert!(!engine.should_skip_untradeable_weather_market_for_today(
+            &trade,
+            "2026-07-17",
+            1000
+        ));
+    }
+
+    #[test]
+    fn non_tradeable_market_status_is_ignored_before_ledgers_for_expired_date() {
+        let mut engine = test_engine_with_event_strategy();
+        engine.config.market_status_check_enabled = true;
+        let employee = test_employee();
+        let mut trade = test_trade("BUY", "condition-closed", "asset-closed", 0.08, 2.0, 100);
+        trade.event_slug = Some("highest-temperature-in-shenzhen-on-january-1-1970".to_owned());
+        trade.slug = Some("highest-temperature-in-shenzhen-on-january-1-1970-27c".to_owned());
+        engine.market_status_cache.push(MarketStatusCacheEntry {
+            cache_key: market_status_cache_key(&trade).expect("cache key"),
+            observed_at_secs: now_secs(),
+            status: MarketTradeStatus::NotTradeable("market closed=true".to_owned()),
+        });
+
+        let reports = engine.handle_trade(&employee, &trade);
+
+        assert!(reports.is_empty());
+        assert_eq!(engine.state.processed_source_trades.len(), 1);
+        assert!(engine.state.source_buy_targets.is_empty());
+        assert!(engine.state.source_event_baskets.is_empty());
+        assert!(engine.state.source_outcomes.is_empty());
     }
 
     #[test]
@@ -10703,6 +11234,7 @@ mod tests {
         AutoCopyEngine {
             config: test_config(),
             state: AutoCopyState::default(),
+            market_status_cache: Vec::new(),
         }
     }
 
@@ -10716,6 +11248,7 @@ mod tests {
         AutoCopyEngine {
             config,
             state: AutoCopyState::default(),
+            market_status_cache: Vec::new(),
         }
     }
 
@@ -10749,6 +11282,7 @@ mod tests {
         config.source_pressure_min_sell_notional_usd = 3.0;
         config.source_pressure_max_avg_sell_gap_seconds = 30;
         config.source_reentry_alert_buy_usd = 30.0;
+        config.market_status_check_enabled = false;
         config.state_path = test_state_path("local");
         config.global_state_path = test_state_path("global");
         config
