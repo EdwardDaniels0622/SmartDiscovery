@@ -82,6 +82,10 @@ pub struct AutoCopyStrategyConfig {
     pub min_basket_outcomes_for_rebalance: usize,
     #[serde(default = "default_event_basket_max_outcome_usd")]
     pub event_basket_max_outcome_usd: f64,
+    #[serde(default = "default_micro_source_notional_usd")]
+    pub micro_source_notional_usd: f64,
+    #[serde(default = "default_micro_leg_max_copy_usd")]
+    pub micro_leg_max_copy_usd: f64,
     #[serde(default = "default_low_price_leg_threshold")]
     pub low_price_leg_threshold: f64,
     #[serde(default = "default_low_price_min_leg_usd")]
@@ -108,6 +112,8 @@ impl Default for AutoCopyStrategyConfig {
             strong_event_min_outcomes: default_strong_event_min_outcomes(),
             min_basket_outcomes_for_rebalance: default_min_basket_outcomes_for_rebalance(),
             event_basket_max_outcome_usd: default_event_basket_max_outcome_usd(),
+            micro_source_notional_usd: default_micro_source_notional_usd(),
+            micro_leg_max_copy_usd: default_micro_leg_max_copy_usd(),
             low_price_leg_threshold: default_low_price_leg_threshold(),
             low_price_min_leg_usd: default_low_price_min_leg_usd(),
             source_reconcile_buy_enabled: default_source_reconcile_buy_enabled(),
@@ -160,6 +166,12 @@ impl AutoCopyStrategyConfig {
         }
         if self.event_basket_max_outcome_usd <= 0.0 {
             return Err("strategy event_basket_max_outcome_usd must be > 0".to_owned());
+        }
+        if self.micro_source_notional_usd < 0.0 {
+            return Err("strategy micro_source_notional_usd must be >= 0".to_owned());
+        }
+        if self.micro_leg_max_copy_usd < 0.0 {
+            return Err("strategy micro_leg_max_copy_usd must be >= 0".to_owned());
         }
         if !(0.0..=1.0).contains(&self.low_price_leg_threshold) {
             return Err("strategy low_price_leg_threshold must be between 0 and 1".to_owned());
@@ -303,6 +315,14 @@ fn default_min_basket_outcomes_for_rebalance() -> usize {
 
 fn default_event_basket_max_outcome_usd() -> f64 {
     12.0
+}
+
+fn default_micro_source_notional_usd() -> f64 {
+    1.0
+}
+
+fn default_micro_leg_max_copy_usd() -> f64 {
+    1.0
 }
 
 fn default_low_price_leg_threshold() -> f64 {
@@ -1818,6 +1838,228 @@ impl AutoCopyEngine {
             })
     }
 
+    fn event_basket_under_target(
+        &self,
+        event_slug: &str,
+        current_position_key: &str,
+        now: u64,
+    ) -> Option<EventBasketOutcomeTarget> {
+        if !self.config.strategy.enabled {
+            return None;
+        }
+        let targets = self.event_basket_targets(event_slug)?;
+        if targets.outcome_count < self.config.strategy.min_basket_outcomes_for_rebalance {
+            return None;
+        }
+
+        targets
+            .targets
+            .into_iter()
+            .filter(|target| target.metadata.position_key != current_position_key)
+            .filter(|target| {
+                !self.is_position_blocked(&target.metadata.position_key)
+                    && !self.state.failure_in_cooldown(
+                        &action_failure_cooldown_key("BUY", &target.metadata.position_key),
+                        now,
+                        self.config.failed_action_cooldown_seconds,
+                    )
+            })
+            .filter(|target| {
+                target.missing_usd > target_reconcile_amount_tolerance(target.target_usd)
+                    && target.missing_usd >= TARGET_RECONCILE_MIN_NOTIONAL_USD
+            })
+            .max_by(|left, right| {
+                left.missing_usd
+                    .total_cmp(&right.missing_usd)
+                    .then_with(|| {
+                        left.metadata
+                            .last_buy_at_secs
+                            .unwrap_or(0)
+                            .cmp(&right.metadata.last_buy_at_secs.unwrap_or(0))
+                    })
+            })
+    }
+
+    fn buy_event_basket_under_target(
+        &mut self,
+        event_slug: &str,
+        target: &EventBasketOutcomeTarget,
+        now: u64,
+    ) -> AutoCopyReport {
+        let mut trade = target.metadata.synthetic_trade(
+            "BUY",
+            target.source_entry_price,
+            target.source_size_shares,
+            now,
+        );
+        trade.proxy_wallet = self.config.source_wallet.clone();
+        trade.name = Some(self.config.source_name.clone());
+
+        let normal_direct_limit_price = price_with_pct_upside(
+            target.source_entry_price,
+            self.effective_buy_chase_pct(target.source_entry_price),
+        );
+        let normal_passive_limit_price = price_with_capped_upside(
+            target.source_entry_price,
+            self.config.passive_offset_pct,
+            self.config.passive_offset,
+        )
+        .min(normal_direct_limit_price);
+        let high_price_reference = target.source_entry_price.max(normal_passive_limit_price);
+        let direct_limit_price = high_price_guarded_direct_limit(
+            target.source_entry_price,
+            normal_direct_limit_price,
+            self.config.high_price_exposure_threshold,
+            self.config.high_price_max_chase_pct,
+        );
+        let passive_limit_price = high_price_guarded_passive_limit(
+            target.source_entry_price,
+            normal_passive_limit_price,
+            direct_limit_price,
+            self.config.high_price_exposure_threshold,
+        );
+
+        let remaining_market = self.config.max_market_exposure_usd
+            - self
+                .state
+                .market_exposure_usd(&target.metadata.position_key);
+        let remaining_daily = self.config.max_daily_spend_usd
+            - self.state.daily_spend_usd
+            - self.state.daily_reserved_buy_usd();
+        let local_requested_copy_amount = target
+            .missing_usd
+            .min(self.config.max_single_copy_usd)
+            .min(remaining_market)
+            .min(remaining_daily)
+            .max(0.0);
+        let min_copy_amount =
+            TARGET_RECONCILE_MIN_NOTIONAL_USD.max(MIN_CLOB_ORDER_SIZE_SHARES * passive_limit_price);
+        let metadata = GlobalOutcomeMetadata::from_source_metadata(&target.metadata);
+        let global_plan = self.reserve_global_buy(
+            &metadata,
+            target.target_usd,
+            local_requested_copy_amount,
+            min_copy_amount,
+            now,
+        );
+        let (copy_amount, global_note, coordination_failed) = match global_plan {
+            Ok(plan) => {
+                let note = if plan.blocked_by_pending() {
+                    format!(
+                        "；全局协调: 同 outcome 已有 {} 笔 BUY 挂单{}，不叠加第二笔挂单",
+                        plan.active_pending_count,
+                        plan.active_pending_source
+                            .as_deref()
+                            .map(|source| format!("（来自 {source}）"))
+                            .unwrap_or_default()
+                    )
+                } else {
+                    format!(
+                        "；全局协调: 多员工目标 {:.4}U / 上限 {:.2}U，已占用 {:.4}U，剩余 {:.4}U，本次预留 {:.4}U",
+                        plan.global_target_usd,
+                        self.config.copy_target_cap_usd,
+                        plan.global_committed_usd,
+                        plan.global_gap_usd,
+                        plan.reserved_amount_usd
+                    )
+                };
+                (plan.reserved_amount_usd, note, false)
+            }
+            Err(error) => (
+                0.0,
+                format!("；全局协调状态不可用，为避免多员工重复买入，本次不补挂；原因: {error}"),
+                true,
+            ),
+        };
+
+        let sizing_reason = format!(
+            "事件篮子全量补仓：{} 当前 event {} 需要同步旧腿；源端当前持有 {:.4}U / {:.4}份，均价 {:.2}c，最近价 {:.2}c，篮子权重 {:.2}%，权重目标 {:.4}U，单腿目标 {:.4}U，已承诺 {:.4}U，缺口 {:.4}U；只按源端价小幅溢价到 {:.2}c post-only 挂单，不按当前市价追买{}{}",
+            self.config.source_name,
+            event_slug,
+            target.source_notional_usd,
+            target.source_size_shares,
+            target.source_avg_price * 100.0,
+            target.source_entry_price * 100.0,
+            target.weight * 100.0,
+            target.uncapped_target_usd,
+            target.target_usd,
+            target.committed_usd,
+            target.missing_usd,
+            passive_limit_price * 100.0,
+            copy_target_cap_note(
+                target.uncapped_target_usd,
+                target.target_usd,
+                high_price_reference,
+                self.config.high_price_exposure_threshold,
+                self.config.high_price_exposure_cap_usd,
+                self.config.copy_target_cap_usd,
+            ),
+            global_note
+        );
+        let execution = if coordination_failed {
+            ExecutionResult::skipped("global auto-copy coordinator unavailable")
+        } else if copy_amount >= min_copy_amount {
+            let request = AutoCopyExecutionRequest::buy(
+                self.config.mode,
+                self.config.source_name.clone(),
+                &trade,
+                copy_amount,
+                direct_limit_price,
+                passive_limit_price,
+                false,
+                self.config.passive_order_ttl_seconds,
+            );
+            self.execute_request(&request)
+        } else {
+            ExecutionResult::skipped(
+                "event basket rebalance gap is below global cap, available budget, or exchange minimum",
+            )
+        };
+
+        let failure_key = action_failure_cooldown_key("BUY", &target.metadata.position_key);
+        if execution.status == ExecutionStatus::Failed {
+            self.state.record_failure(
+                failure_key,
+                execution
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| "event basket rebalance buy failed".to_owned()),
+                now,
+            );
+        } else if !matches!(execution.status, ExecutionStatus::Skipped) {
+            self.state.clear_failure(&failure_key);
+        }
+
+        let mut report = self.report_from_execution(
+            "BUY",
+            &trade,
+            target.source_notional_usd,
+            copy_amount.max(0.0),
+            direct_limit_price,
+            Some(passive_limit_price),
+            Some(false),
+            &execution,
+            Some(&sizing_reason),
+        );
+        self.apply_buy_execution(
+            &target.metadata.position_key,
+            &trade,
+            copy_amount.max(0.0),
+            passive_limit_price,
+            now,
+            &execution,
+        );
+        if !coordination_failed {
+            let _ = self.sync_global_source_exposure(&metadata, Some(target.target_usd), now);
+        }
+        report.market_exposure_after_usd = self
+            .state
+            .market_exposure_usd(&target.metadata.position_key);
+        report.daily_spend_after_usd =
+            self.state.daily_spend_usd + self.state.daily_reserved_buy_usd();
+        report
+    }
+
     fn buy_position_under_target(
         &mut self,
         reconcile: &TargetReconcileBuy,
@@ -2115,6 +2357,148 @@ impl AutoCopyEngine {
         )
     }
 
+    fn source_current_for_basket_outcome(
+        &self,
+        outcome: &SourceEventBasketOutcome,
+    ) -> Option<(f64, f64, f64, f64)> {
+        if let Some(ledger) = self
+            .state
+            .source_position_ledgers
+            .iter()
+            .find(|ledger| ledger.position_key == outcome.position_key)
+            .filter(|ledger| ledger.net_size_shares > 0.000_001)
+        {
+            let avg_price = ledger
+                .avg_entry_price
+                .filter(|price| *price > 0.0 && *price <= 1.0)
+                .or(outcome.avg_buy_price)
+                .or(outcome.last_price)?;
+            let entry_price = ledger
+                .last_price
+                .filter(|price| *price > 0.0 && *price <= 1.0)
+                .or(ledger.avg_entry_price)
+                .or(outcome.last_price)
+                .or(outcome.avg_buy_price)?;
+            let notional = ledger.net_size_shares * avg_price;
+            if notional > 0.000_001 {
+                return Some((notional, ledger.net_size_shares, avg_price, entry_price));
+            }
+        }
+
+        let net_size = outcome.net_buy_size_shares();
+        if net_size <= 0.000_001 {
+            return None;
+        }
+        let avg_price = outcome
+            .avg_buy_price
+            .filter(|price| *price > 0.0 && *price <= 1.0)
+            .or(outcome.last_price)?;
+        let entry_price = outcome
+            .last_price
+            .filter(|price| *price > 0.0 && *price <= 1.0)
+            .or(outcome.avg_buy_price)?;
+        Some((net_size * avg_price, net_size, avg_price, entry_price))
+            .filter(|(notional, _, _, _)| *notional > 0.000_001)
+    }
+
+    fn event_basket_targets(&self, event_slug: &str) -> Option<EventBasketTargetSet> {
+        let basket = self.state.source_event_basket(event_slug)?;
+        let mut current = basket
+            .outcomes
+            .iter()
+            .filter_map(|outcome| {
+                let (source_notional, source_size, source_avg_price, source_entry_price) =
+                    self.source_current_for_basket_outcome(outcome)?;
+                let metadata = self
+                    .state
+                    .source_outcomes
+                    .iter()
+                    .find(|metadata| metadata.position_key == outcome.position_key)
+                    .cloned()
+                    .unwrap_or_else(|| outcome.to_metadata(event_slug));
+                Some((
+                    outcome,
+                    metadata,
+                    source_notional,
+                    source_size,
+                    source_avg_price,
+                    source_entry_price,
+                ))
+            })
+            .collect::<Vec<_>>();
+
+        if current.is_empty() {
+            return None;
+        }
+
+        let source_notional_usd = current
+            .iter()
+            .map(|(_, _, source_notional, _, _, _)| *source_notional)
+            .sum::<f64>();
+        if source_notional_usd <= 0.000_001 {
+            return None;
+        }
+        let outcome_count = current.len();
+        let budget = self
+            .config
+            .strategy
+            .event_budget(source_notional_usd, outcome_count);
+        let committed = self.state.event_committed_usd(event_slug);
+        let remaining = (budget - committed).max(0.0);
+
+        let targets = current
+            .drain(..)
+            .map(
+                |(
+                    _outcome,
+                    metadata,
+                    source_notional,
+                    source_size,
+                    source_avg_price,
+                    source_entry_price,
+                )| {
+                    let weight = (source_notional / source_notional_usd).clamp(0.0, 1.0);
+                    let uncapped_target = budget * weight;
+                    let mut target =
+                        uncapped_target.min(self.config.strategy.event_basket_max_outcome_usd);
+                    if source_entry_price <= self.config.strategy.low_price_leg_threshold
+                        && target < self.config.strategy.low_price_min_leg_usd
+                    {
+                        target = self.config.strategy.low_price_min_leg_usd;
+                    }
+                    if source_notional <= self.config.strategy.micro_source_notional_usd
+                        && self.config.strategy.micro_leg_max_copy_usd > 0.0
+                    {
+                        target = target.min(self.config.strategy.micro_leg_max_copy_usd);
+                    }
+                    let committed_usd = self.state.market_exposure_usd(&metadata.position_key);
+                    EventBasketOutcomeTarget {
+                        metadata,
+                        source_notional_usd: source_notional,
+                        source_size_shares: source_size,
+                        source_avg_price,
+                        source_entry_price,
+                        weight,
+                        uncapped_target_usd: uncapped_target,
+                        target_usd: target,
+                        committed_usd,
+                        missing_usd: (target - committed_usd).max(0.0),
+                    }
+                },
+            )
+            .collect::<Vec<_>>();
+
+        Some(EventBasketTargetSet {
+            event_slug: event_slug.to_owned(),
+            budget_usd: budget,
+            committed_usd: committed,
+            remaining_usd: remaining,
+            source_notional_usd,
+            outcome_count,
+            targets,
+        })
+    }
+
     fn buy_sizing_decision(
         &self,
         trade: &UserTrade,
@@ -2194,61 +2578,39 @@ impl AutoCopyEngine {
         let mut event_committed_usd = None;
         let mut event_remaining_usd = None;
         if let Some(event_slug) = event_slug_for_trade(trade) {
-            if let Some(basket) = self.state.source_event_basket(&event_slug) {
-                let outcome_count = basket.buy_outcome_count();
-                let budget = self
-                    .config
-                    .strategy
-                    .event_budget(basket.buy_notional_usd, outcome_count);
-                let committed = self.state.event_committed_usd(&event_slug);
-                let remaining = (budget - committed).max(0.0);
-                event_budget_usd = Some(budget);
-                event_committed_usd = Some(committed);
-                event_remaining_usd = Some(remaining);
-                if outcome_count >= self.config.strategy.min_basket_outcomes_for_rebalance {
-                    let net_total = basket
-                        .outcomes
-                        .iter()
-                        .map(SourceEventBasketOutcome::net_buy_notional_usd)
-                        .sum::<f64>()
-                        .max(basket.buy_notional_usd.max(0.0));
-                    if net_total > 0.0 {
-                        if let Some(outcome) = basket.outcome(&source_buy_target.position_key) {
-                            let weight =
-                                (outcome.net_buy_notional_usd() / net_total).clamp(0.0, 1.0);
-                            let uncapped_basket_target = budget * weight;
-                            let mut basket_target = uncapped_basket_target
-                                .min(self.config.strategy.event_basket_max_outcome_usd);
-                            if source_price <= self.config.strategy.low_price_leg_threshold
-                                && outcome.buy_notional_usd > 0.0
-                                && basket_target < self.config.strategy.low_price_min_leg_usd
-                            {
-                                basket_target = self.config.strategy.low_price_min_leg_usd;
-                            }
-                            raw_target = basket_target;
-                            strategy_parts.push(format!(
-                                "事件篮子 {}：{} 个买入选项，事件预算 {:.2}U，当前 outcome 权重 {:.2}%，篮子权重目标 {:.2}U，单 outcome 上限 {:.2}U，篮子目标 {:.2}U，事件已承诺 {:.2}U/剩余 {:.2}U",
-                                event_slug,
-                                outcome_count,
-                                budget,
-                                weight * 100.0,
-                                uncapped_basket_target,
-                                self.config.strategy.event_basket_max_outcome_usd,
-                                basket_target,
-                                committed,
-                                remaining
-                            ));
-                        }
+            if let Some(targets) = self.event_basket_targets(&event_slug) {
+                event_budget_usd = Some(targets.budget_usd);
+                event_committed_usd = Some(targets.committed_usd);
+                event_remaining_usd = Some(targets.remaining_usd);
+                if targets.outcome_count >= self.config.strategy.min_basket_outcomes_for_rebalance {
+                    if let Some(target) = targets.target_for_key(&source_buy_target.position_key) {
+                        raw_target = target.target_usd;
+                        strategy_parts.push(format!(
+                            "事件篮子 {}：{} 个当前持仓选项，源端当前成本合计 {:.4}U，事件预算 {:.2}U，当前 outcome 权重 {:.2}%，篮子权重目标 {:.2}U，单 outcome 上限 {:.2}U，微腿上限 {:.2}U@源端≤{:.2}U，篮子目标 {:.2}U，事件已承诺 {:.2}U/剩余 {:.2}U",
+                            targets.event_slug,
+                            targets.outcome_count,
+                            targets.source_notional_usd,
+                            targets.budget_usd,
+                            target.weight * 100.0,
+                            target.uncapped_target_usd,
+                            self.config.strategy.event_basket_max_outcome_usd,
+                            self.config.strategy.micro_leg_max_copy_usd,
+                            self.config.strategy.micro_source_notional_usd,
+                            target.target_usd,
+                            targets.committed_usd,
+                            targets.remaining_usd
+                        ));
                     }
                 } else {
                     strategy_parts.push(format!(
-                        "事件篮子 {}：当前仅 {} 个买入选项，未达到 {} 个 outcome 的篮子重算门槛，先按热路径小买；事件预算 {:.2}U，已承诺 {:.2}U/剩余 {:.2}U",
-                        event_slug,
-                        outcome_count,
+                        "事件篮子 {}：当前仅 {} 个持仓选项，未达到 {} 个 outcome 的篮子重算门槛，先按热路径小买；源端当前成本 {:.4}U，事件预算 {:.2}U，已承诺 {:.2}U/剩余 {:.2}U",
+                        targets.event_slug,
+                        targets.outcome_count,
                         self.config.strategy.min_basket_outcomes_for_rebalance,
-                        budget,
-                        committed,
-                        remaining
+                        targets.source_notional_usd,
+                        targets.budget_usd,
+                        targets.committed_usd,
+                        targets.remaining_usd
                     ));
                 }
             }
@@ -3186,6 +3548,21 @@ impl AutoCopyEngine {
         report.daily_spend_after_usd =
             self.state.daily_spend_usd + self.state.daily_reserved_buy_usd();
         reports.push(report);
+        if self.config.strategy.enabled
+            && matches!(
+                execution.status,
+                ExecutionStatus::Filled
+                    | ExecutionStatus::Pending
+                    | ExecutionStatus::Submitted
+                    | ExecutionStatus::DryRun
+            )
+        {
+            if let Some(event_slug) = event_slug_for_trade(trade) {
+                if let Some(target) = self.event_basket_under_target(&event_slug, &key, now) {
+                    reports.push(self.buy_event_basket_under_target(&event_slug, &target, now));
+                }
+            }
+        }
         reports
     }
 
@@ -6832,17 +7209,12 @@ pub struct SourceEventBasket {
 }
 
 impl SourceEventBasket {
+    #[cfg(test)]
     fn buy_outcome_count(&self) -> usize {
         self.outcomes
             .iter()
             .filter(|outcome| outcome.buy_notional_usd > 0.0)
             .count()
-    }
-
-    fn outcome(&self, position_key: &str) -> Option<&SourceEventBasketOutcome> {
-        self.outcomes
-            .iter()
-            .find(|outcome| outcome.position_key == position_key)
     }
 
     fn upsert_trade_outcome(
@@ -6925,8 +7297,26 @@ pub struct SourceEventBasketOutcome {
 }
 
 impl SourceEventBasketOutcome {
-    fn net_buy_notional_usd(&self) -> f64 {
-        (self.buy_notional_usd - self.sell_notional_usd).max(0.0)
+    fn to_metadata(&self, event_slug: &str) -> SourceOutcomeMetadata {
+        SourceOutcomeMetadata {
+            position_key: self.position_key.clone(),
+            asset: self.asset.clone(),
+            condition_id: self.condition_id.clone(),
+            market_title: self.market_title.clone(),
+            outcome: self.outcome.clone(),
+            slug: None,
+            event_slug: Some(event_slug.to_owned()),
+            last_price: self.last_price,
+            last_buy_price: self.avg_buy_price,
+            first_seen_at_secs: self.first_seen_at_secs,
+            last_seen_at_secs: self.last_seen_at_secs,
+            last_buy_at_secs: self.last_buy_at_secs,
+            last_sell_at_secs: self.last_sell_at_secs,
+        }
+    }
+
+    fn net_buy_size_shares(&self) -> f64 {
+        (self.buy_size_shares - self.sell_size_shares).max(0.0)
     }
 }
 
@@ -6996,6 +7386,39 @@ struct BuySizingDecision {
     event_budget_usd: Option<f64>,
     event_committed_usd: Option<f64>,
     event_remaining_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
+struct EventBasketTargetSet {
+    event_slug: String,
+    budget_usd: f64,
+    committed_usd: f64,
+    remaining_usd: f64,
+    source_notional_usd: f64,
+    outcome_count: usize,
+    targets: Vec<EventBasketOutcomeTarget>,
+}
+
+impl EventBasketTargetSet {
+    fn target_for_key(&self, position_key: &str) -> Option<&EventBasketOutcomeTarget> {
+        self.targets
+            .iter()
+            .find(|target| target.metadata.position_key == position_key)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct EventBasketOutcomeTarget {
+    metadata: SourceOutcomeMetadata,
+    source_notional_usd: f64,
+    source_size_shares: f64,
+    source_avg_price: f64,
+    source_entry_price: f64,
+    weight: f64,
+    uncapped_target_usd: f64,
+    target_usd: f64,
+    committed_usd: f64,
+    missing_usd: f64,
 }
 
 impl SourceFlowStats {
@@ -9111,6 +9534,124 @@ mod tests {
         assert!(second_buy.reason.contains("事件篮子"));
         assert!(second_buy.reason.contains("当前 outcome 权重 16.67%"));
         assert_eq!(engine.state.source_event_baskets[0].buy_outcome_count(), 2);
+    }
+
+    #[test]
+    fn event_strategy_backfills_previous_outcome_after_second_enters_basket() {
+        let mut engine = test_engine_with_event_strategy();
+        let employee = test_employee();
+        let first_trade = test_trade(
+            "BUY",
+            "weather-market",
+            "asset-london-23",
+            0.0868563635,
+            17.354769990935,
+            100,
+        );
+        let first_key = position_key(&first_trade);
+        engine.handle_trade(&employee, &first_trade);
+        engine.state.positions.push(CopyPosition {
+            position_key: first_key.clone(),
+            market_title: first_trade.title.clone(),
+            outcome: first_trade.outcome.clone(),
+            asset: first_trade.asset.clone(),
+            condition_id: first_trade.condition_id.clone(),
+            size_shares: 16.4475,
+            cost_usd: 1.5,
+            realized_pnl_usd: 0.0,
+            updated_at_secs: 100,
+        });
+
+        let reports = engine.handle_trade(
+            &employee,
+            &test_trade(
+                "BUY",
+                "weather-market",
+                "asset-london-24",
+                0.0270996694,
+                6.5581199992,
+                110,
+            ),
+        );
+        let backfill = reports
+            .iter()
+            .find(|report| {
+                report.position_key == first_key && report.reason.contains("事件篮子全量补仓")
+            })
+            .expect("expected previous outcome basket backfill");
+
+        assert_eq!(backfill.status, "dry-run");
+        assert_near(backfill.copy_amount_usd, 9.386243780181158);
+        assert!(backfill.reason.contains("只按源端价小幅溢价"));
+    }
+
+    #[test]
+    fn event_strategy_caps_micro_source_leg_after_basket_rebalance() {
+        let mut engine = test_engine_with_event_strategy();
+        let employee = test_employee();
+
+        engine.handle_trade(
+            &employee,
+            &test_trade("BUY", "weather-market", "asset-tokyo-24", 0.06, 6.3522, 100),
+        );
+        let reports = engine.handle_trade(
+            &employee,
+            &test_trade(
+                "BUY",
+                "weather-market",
+                "asset-tokyo-23",
+                0.012,
+                0.5286,
+                110,
+            ),
+        );
+        let micro_buy = reports
+            .iter()
+            .find(|report| report.position_key.ends_with(":asset-tokyo-23"))
+            .expect("expected micro leg buy report");
+
+        assert_eq!(micro_buy.status, "dry-run");
+        assert_near(micro_buy.copy_amount_usd, 1.0);
+        assert!(micro_buy.reason.contains("微腿上限 1.00U@源端≤1.00U"));
+    }
+
+    #[test]
+    fn event_strategy_uses_current_source_ledger_after_profitable_sell_and_rebuy() {
+        let mut engine = test_engine_with_event_strategy();
+        let employee = test_employee();
+
+        engine.handle_trade(
+            &employee,
+            &test_trade("BUY", "weather-market", "asset-seoul-25", 0.18, 13.5, 100),
+        );
+        engine.handle_trade(
+            &employee,
+            &test_trade("SELL", "weather-market", "asset-seoul-25", 0.48, 36.0, 110),
+        );
+        engine.handle_trade(
+            &employee,
+            &test_trade(
+                "BUY",
+                "weather-market",
+                "asset-seoul-25",
+                0.094,
+                5.3392,
+                120,
+            ),
+        );
+
+        let targets = engine
+            .event_basket_targets("highest-temperature-in-hong-kong-on-december-31-2099")
+            .expect("expected event basket targets");
+        let target = targets
+            .targets
+            .iter()
+            .find(|target| target.metadata.position_key.ends_with(":asset-seoul-25"))
+            .expect("expected rebought source leg");
+
+        assert_eq!(targets.outcome_count, 1);
+        assert_near(target.source_size_shares, 56.8);
+        assert_near(target.source_notional_usd, 5.3392);
     }
 
     #[test]
