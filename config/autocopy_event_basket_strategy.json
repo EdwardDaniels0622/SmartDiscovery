@@ -7,7 +7,7 @@
   "strong_event_source_notional_usd": 80.0,
   "strong_event_min_outcomes": 3,
   "min_basket_outcomes_for_rebalance": 2,
-  "hot_path_max_single_buy_usd": 6.0,
+  "event_basket_max_outcome_usd": 12.0,
   "low_price_leg_threshold": 0.30,
   "low_price_min_leg_usd": 1.0,
   "source_reconcile_buy_enabled": false,

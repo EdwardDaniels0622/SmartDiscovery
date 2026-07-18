@@ -80,8 +80,8 @@ pub struct AutoCopyStrategyConfig {
     pub strong_event_min_outcomes: usize,
     #[serde(default = "default_min_basket_outcomes_for_rebalance")]
     pub min_basket_outcomes_for_rebalance: usize,
-    #[serde(default = "default_hot_path_max_single_buy_usd")]
-    pub hot_path_max_single_buy_usd: f64,
+    #[serde(default = "default_event_basket_max_outcome_usd")]
+    pub event_basket_max_outcome_usd: f64,
     #[serde(default = "default_low_price_leg_threshold")]
     pub low_price_leg_threshold: f64,
     #[serde(default = "default_low_price_min_leg_usd")]
@@ -107,7 +107,7 @@ impl Default for AutoCopyStrategyConfig {
             strong_event_source_notional_usd: default_strong_event_source_notional_usd(),
             strong_event_min_outcomes: default_strong_event_min_outcomes(),
             min_basket_outcomes_for_rebalance: default_min_basket_outcomes_for_rebalance(),
-            hot_path_max_single_buy_usd: default_hot_path_max_single_buy_usd(),
+            event_basket_max_outcome_usd: default_event_basket_max_outcome_usd(),
             low_price_leg_threshold: default_low_price_leg_threshold(),
             low_price_min_leg_usd: default_low_price_min_leg_usd(),
             source_reconcile_buy_enabled: default_source_reconcile_buy_enabled(),
@@ -158,8 +158,8 @@ impl AutoCopyStrategyConfig {
         if self.max_event_budget_usd <= 0.0 {
             return Err("strategy max_event_budget_usd must be > 0".to_owned());
         }
-        if self.hot_path_max_single_buy_usd <= 0.0 {
-            return Err("strategy hot_path_max_single_buy_usd must be > 0".to_owned());
+        if self.event_basket_max_outcome_usd <= 0.0 {
+            return Err("strategy event_basket_max_outcome_usd must be > 0".to_owned());
         }
         if !(0.0..=1.0).contains(&self.low_price_leg_threshold) {
             return Err("strategy low_price_leg_threshold must be between 0 and 1".to_owned());
@@ -301,8 +301,8 @@ fn default_min_basket_outcomes_for_rebalance() -> usize {
     2
 }
 
-fn default_hot_path_max_single_buy_usd() -> f64 {
-    6.0
+fn default_event_basket_max_outcome_usd() -> f64 {
+    12.0
 }
 
 fn default_low_price_leg_threshold() -> f64 {
@@ -2179,18 +2179,15 @@ impl AutoCopyEngine {
                 multiplier: 1.0,
                 label: "default".to_owned(),
             });
-        let hot_path_target = (bucket.base_buy_usd * multiplier.multiplier)
-            .min(self.config.strategy.hot_path_max_single_buy_usd)
-            .max(0.0);
+        let hot_path_target = (bucket.base_buy_usd * multiplier.multiplier).max(0.0);
         let mut raw_target = hot_path_target;
         let mut strategy_parts = vec![format!(
-            "价格档 {} 基础 {:.2}U × 员工同 outcome 累计 {} 倍数 {:.2} = {:.2}U，热路径单 outcome 初始上限 {:.2}U",
+            "价格档 {} 基础 {:.2}U × 员工同 outcome 累计 {} 倍数 {:.2} = {:.2}U，热路径按该计算值先跟",
             bucket.label,
             bucket.base_buy_usd,
             multiplier.label,
             multiplier.multiplier,
-            bucket.base_buy_usd * multiplier.multiplier,
-            self.config.strategy.hot_path_max_single_buy_usd
+            bucket.base_buy_usd * multiplier.multiplier
         )];
 
         let mut event_budget_usd = None;
@@ -2219,7 +2216,9 @@ impl AutoCopyEngine {
                         if let Some(outcome) = basket.outcome(&source_buy_target.position_key) {
                             let weight =
                                 (outcome.net_buy_notional_usd() / net_total).clamp(0.0, 1.0);
-                            let mut basket_target = budget * weight;
+                            let uncapped_basket_target = budget * weight;
+                            let mut basket_target = uncapped_basket_target
+                                .min(self.config.strategy.event_basket_max_outcome_usd);
                             if source_price <= self.config.strategy.low_price_leg_threshold
                                 && outcome.buy_notional_usd > 0.0
                                 && basket_target < self.config.strategy.low_price_min_leg_usd
@@ -2228,11 +2227,13 @@ impl AutoCopyEngine {
                             }
                             raw_target = basket_target;
                             strategy_parts.push(format!(
-                                "事件篮子 {}：{} 个买入选项，事件预算 {:.2}U，当前 outcome 权重 {:.2}%，篮子目标 {:.2}U，事件已承诺 {:.2}U/剩余 {:.2}U",
+                                "事件篮子 {}：{} 个买入选项，事件预算 {:.2}U，当前 outcome 权重 {:.2}%，篮子权重目标 {:.2}U，单 outcome 上限 {:.2}U，篮子目标 {:.2}U，事件已承诺 {:.2}U/剩余 {:.2}U",
                                 event_slug,
                                 outcome_count,
                                 budget,
                                 weight * 100.0,
+                                uncapped_basket_target,
+                                self.config.strategy.event_basket_max_outcome_usd,
                                 basket_target,
                                 committed,
                                 remaining
@@ -9110,6 +9111,31 @@ mod tests {
         assert!(second_buy.reason.contains("事件篮子"));
         assert!(second_buy.reason.contains("当前 outcome 权重 16.67%"));
         assert_eq!(engine.state.source_event_baskets[0].buy_outcome_count(), 2);
+    }
+
+    #[test]
+    fn event_strategy_caps_single_outcome_after_basket_rebalance() {
+        let mut engine = test_engine_with_event_strategy();
+        engine.config.strategy.event_basket_max_outcome_usd = 12.0;
+        let employee = test_employee();
+
+        engine.handle_trade(
+            &employee,
+            &test_trade("BUY", "weather-market", "asset-tail", 0.05, 5.0, 100),
+        );
+        let reports = engine.handle_trade(
+            &employee,
+            &test_trade("BUY", "weather-market", "asset-main", 0.15, 100.0, 110),
+        );
+        let buy = reports
+            .iter()
+            .find(|report| report.action == "BUY")
+            .expect("expected capped basket buy");
+
+        assert_near(buy.copy_amount_usd, 12.0);
+        assert!(buy.reason.contains("事件预算 30.00U"));
+        assert!(buy.reason.contains("单 outcome 上限 12.00U"));
+        assert!(buy.reason.contains("篮子目标 12.00U"));
     }
 
     #[test]
